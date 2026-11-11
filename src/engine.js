@@ -1,5 +1,7 @@
 // Input engine: script conversion + dictionary lookup. No DOM access, so it is testable in Node.
 
+export const LANGS = ['nan', 'hak', 'cmn'];
+
 // ---- Taiwanese Hokkien: Tâi-lô (TL) -> Taiwan Phonetic Symbols (extended Bopomofo) ----
 
 const INITIALS = [
@@ -89,18 +91,28 @@ export function tlMarked(text) {
   return syls.length ? syls.map(markSyllable).join('-') : '';
 }
 
-// ---- Mandarin: standard Zhuyin keyboard layout ----
+// ---- Normalising mixed input (Latin, diacritics, extended Bopomofo) ----
 
-export const ZHUYIN_LAYOUT = {
-  '1': 'ㄅ', q: 'ㄆ', a: 'ㄇ', z: 'ㄈ', '2': 'ㄉ', w: 'ㄊ', s: 'ㄋ', x: 'ㄌ',
-  e: 'ㄍ', d: 'ㄎ', c: 'ㄏ', r: 'ㄐ', f: 'ㄑ', v: 'ㄒ', '5': 'ㄓ', t: 'ㄔ',
-  g: 'ㄕ', b: 'ㄖ', y: 'ㄗ', h: 'ㄘ', n: 'ㄙ', u: 'ㄧ', j: 'ㄨ', m: 'ㄩ',
-  '8': 'ㄚ', i: 'ㄛ', k: 'ㄜ', ',': 'ㄝ', '9': 'ㄞ', o: 'ㄟ', l: 'ㄠ', '.': 'ㄡ',
-  '0': 'ㄢ', p: 'ㄣ', ';': 'ㄤ', '/': 'ㄥ', '-': 'ㄦ',
-  '3': 'ˇ', '4': 'ˋ', '6': 'ˊ', '7': '˙',
+export const stripBpmfTone = (s) => s.replace(/[ˇˋˊ˙ˉ˪˫]/g, '');
+
+// Extended Bopomofo letters -> the Tâi-lô letters they stand for.
+const EXT_TO_TL = {
+  'ㆠ': 'b', 'ㆡ': 'j', 'ㆢ': 'j', 'ㆣ': 'g', 'ㆤ': 'e', 'ㆥ': 'enn', 'ㆦ': 'oo', 'ㆧ': 'onn',
+  'ㆨ': 'ir', 'ㆩ': 'ann', 'ㆪ': 'inn', 'ㆫ': 'unn', 'ㆬ': 'im', 'ㆭ': 'ng', 'ㆮ': 'ainn',
+  'ㆯ': 'aunn', 'ㆰ': 'am', 'ㆱ': 'om', 'ㆲ': 'ong', 'ㆳ': 'innn', 'ㆴ': 'p', 'ㆵ': 't',
+  'ㆶ': 'k', 'ㆷ': 'h', 'ㆸ': 'gh', 'ㆹ': 'lh', 'ㆺ': 'zy', 'ㆻ': 'g', 'ㆼ': 'gw', 'ㆽ': 'kw',
+  'ㆾ': 'oe', 'ㆿ': 'ah',
 };
 
-export const stripBpmfTone = (s) => s.replace(/[ˇˋˊ˙ˉ\u02EA\u02EB]/g, '');
+const STD_BPMF = /[\u3105-\u312F]/;
+const letters = (s) => s.toLowerCase().replace(/[^a-z]/g, '');
+
+// Toneless lowercase Latin lookup key: o͘ -> oo, ⁿ -> nn, tone marks and tone digits dropped.
+export function toLatinKey(buffer) {
+  let s = buffer.replace(/o\u0358/gi, 'oo').replace(/ⁿ/g, 'nn');
+  s = [...s].map((c) => EXT_TO_TL[c] ?? c).join('');
+  return letters(s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
+}
 
 // ---- Dictionary ----
 
@@ -108,63 +120,74 @@ export class Dictionary {
   constructor(entries) {
     this.index = new Map();
     for (const e of entries) {
-      if (!this.index.has(e.key)) this.index.set(e.key, []);
-      this.index.get(e.key).push(e);
+      for (const k of e.keys) {
+        if (!this.index.has(k)) this.index.set(k, []);
+        this.index.get(k).push(e);
+      }
     }
-    this.keys = [...this.index.keys()].sort();
+    this.sortedKeys = [...this.index.keys()].sort();
   }
 
   // Exact matches first, then entries whose key starts with the buffer.
   lookup(key, limit = 30) {
     if (!key) return [];
     const out = [...(this.index.get(key) || [])];
-    for (const k of this.keys) {
+    for (const k of this.sortedKeys) {
       if (out.length >= limit) break;
       if (k !== key && k.startsWith(key)) out.push(...this.index.get(k));
     }
-    return out.slice(0, limit);
+    return [...new Set(out)].slice(0, limit);
   }
+}
+
+// Raw rows: [text, reading, source, pinyin?]. Mandarin is also findable by pinyin.
+export function buildEntries(raw, mode) {
+  return raw.map(([text, reading, src, pinyin]) => ({
+    text,
+    reading,
+    src,
+    keys: mode === 'cmn' ? [stripBpmfTone(reading), letters(pinyin || '')].filter(Boolean) : [letters(reading)],
+  }));
 }
 
 // ---- Candidate generation ----
 
-const letters = (s) => s.toLowerCase().replace(/[^a-z]/g, '');
-
-// Raw rows: [text, reading, source]. `key` is the toneless lookup key.
-export function buildEntries(raw, mode) {
-  return raw.map(([text, reading, src]) => ({
-    text,
-    reading,
-    src,
-    key: mode === 'cmn' ? stripBpmfTone(reading) : letters(reading),
-  }));
-}
-
-export function candidates(mode, buffer, dicts) {
+// `order` is the user's language priority; hits from every language are shown, best-ranked first.
+export function candidates(buffer, dicts, order = LANGS, limit = 40) {
   if (!buffer) return [];
-  const out = [];
-  const seen = new Set();
-  const push = (c) => {
-    if (seen.has(c.text)) return;
-    seen.add(c.text);
-    out.push(c);
+  const merged = new Map();
+  const add = (text, label, lang, src) => {
+    let c = merged.get(text);
+    if (!c) {
+      c = { text, label, src, langs: [] };
+      merged.set(text, c);
+    }
+    if (!c.langs.includes(lang)) c.langs.push(lang);
   };
 
-  if (mode === 'cmn') {
-    for (const e of dicts.cmn.lookup(stripBpmfTone(buffer))) push({ text: e.text, label: e.reading, src: e.src });
-    push({ text: buffer, label: '注音' });
-    return out;
+  const bpmfOnly = STD_BPMF.test(buffer) && !/[a-z]/i.test(buffer);
+  const latin = bpmfOnly ? '' : toLatinKey(buffer);
+  for (const lang of order) {
+    let hits = [];
+    if (bpmfOnly) hits = lang === 'cmn' ? dicts.cmn.lookup(stripBpmfTone(buffer)) : [];
+    else if (latin) hits = dicts[lang].lookup(latin);
+    for (const e of hits) add(e.text, e.reading, lang, e.src);
   }
+  const dictList = [...merged.values()];
 
-  const dict = mode === 'nan' ? dicts.nan : dicts.hak;
-  for (const e of dict.lookup(letters(buffer))) push({ text: e.text, label: e.reading, src: e.src });
-  if (mode === 'nan') {
+  const extras = [];
+  if (/^[A-Za-z0-9'-]+$/.test(buffer)) {
     const tps = tlToTps(buffer);
-    const marked = tlMarked(buffer);
-    if (tps) push({ text: tps, label: '方音符號' });
-    if (marked) push({ text: marked, label: 'Tâi-lô' });
-  } else {
-    push({ text: buffer.replace(/[0-9]/g, ''), label: 'Pinyin' });
+    if (tps) extras.push({ text: tps, label: '方音符號', langs: [] });
+    let marked = tlMarked(buffer);
+    if (marked && /^[A-Z]/.test(buffer)) marked = marked[0].toUpperCase() + marked.slice(1);
+    if (marked) extras.push({ text: marked, label: 'Tâi-lô', langs: [] });
   }
-  return out;
+  const raw = { text: buffer, label: '原樣', langs: [] };
+
+  // Explicitly typed special characters (ㆠ, ⁿ, tone marks...) should commit as typed first.
+  const explicit = /[^\x00-\x7F]/.test(buffer) && !bpmfOnly;
+  const all = explicit ? [raw, ...dictList, ...extras] : [...dictList, ...extras, raw];
+  const seen = new Set();
+  return all.filter((c) => !seen.has(c.text) && seen.add(c.text)).slice(0, limit);
 }

@@ -13,11 +13,16 @@ npm test         # engine tests
 
 ## Usage
 
-- **臺語 TL**: type Tâi-lô with tone digits (`tai5-uan5`). Candidates: Han characters, extended Bopomofo (`ㄉㄞˊ ㄨㄢˊ`), and tone-marked TL (`tâi-uân`).
-- **客語 Pinyin**: type Hakka pinyin (`hak-ga`).
-- **華語 ㄅㄆㄇ**: standard Zhuyin keyboard layout (the on-screen keys show the symbols).
-- Space commits the highlighted candidate, Enter commits the raw text, arrows change selection, Esc cancels.
-- The **符號** panel inserts extended Bopomofo, tone marks, and Latin letters with diacritics directly.
+One QWERTY keyboard serves all languages. Type Latin letters (Tâi-lô `tai5-uan5`, Hakka pinyin `hak-ga`, Mandarin pinyin `taiwan`) with tone digits, or Zhuyin typed from variants.
+
+- **Variants**: every key carries the extended letters most similar to it (`b` → ㆠ ㄅ, `o` → ㆦ o͘ ㆧ …, `n` → ⁿ ㆭ …, `u` → ṳ …), plus tone marks (á à â ā a̍ ǎ…). The small corner hint shows the top variant.
+  - **Long-press** a key to open its variants, then slide to one and release (or tap it).
+  - **Shift + key** (on-screen ⇧ or physical Shift) inserts the first variant; repeat the same key to step through the rest, ending on the plain letter. On-screen ⇧ applies to one key at a time; tap it again for another key.
+- **Priority language** (臺語 / 客語 / 華語 buttons): orders each key's variants and the candidate list. Candidates from the other languages are still shown, marked with 臺/客/華 badges.
+- Space commits the highlighted candidate, Enter commits the raw text, arrows change selection, Esc cancels. `Aa` = one-shot capital (CapsLock on a physical keyboard). 轉換 turns conversion off for direct typing.
+- Typing extended characters explicitly (e.g. ㆠ) commits them as typed first. Candidates always include the Tâi-lô → 方音符號 and tone-marked TL conversions for Hokkien.
+
+Limits: dictionary lookup ignores tones, and standard Bopomofo mixed with Latin letters in one syllable isn't converted.
 
 ## Dictionary
 

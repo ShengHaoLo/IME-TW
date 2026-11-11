@@ -12,11 +12,11 @@
 <body>
   <header>
     <h1>臺灣語言輸入法 <small>IME-TW</small></h1>
-    <nav id="modes" role="tablist" aria-label="輸入語言">
-      <button role="tab" data-mode="nan" aria-selected="true">臺語 TL</button>
-      <button role="tab" data-mode="hak" aria-selected="false">客語 Pinyin</button>
-      <button role="tab" data-mode="cmn" aria-selected="false">華語 ㄅㄆㄇ</button>
-      <button role="tab" data-mode="raw" aria-selected="false">直接輸入</button>
+    <nav id="langs" role="group" aria-label="優先語言">
+      <span class="label">優先語言</span>
+      <button data-lang="nan" aria-pressed="true">臺語</button>
+      <button data-lang="hak" aria-pressed="false">客語</button>
+      <button data-lang="cmn" aria-pressed="false">華語</button>
     </nav>
   </header>
 
@@ -33,13 +33,14 @@
     <section id="kbd" aria-label="螢幕鍵盤"></section>
 
     <div class="tools">
-      <button id="toggle-symbols" aria-pressed="false">符號 ㆠㆣㆦ ô͘</button>
-      <button id="toggle-native" aria-pressed="false">使用系統鍵盤</button>
+      <button id="toggle-ime" aria-pressed="true">轉換</button>
+      <button id="toggle-native" aria-pressed="false">系統鍵盤</button>
       <button id="copy">複製</button>
       <button id="clear">清除</button>
     </div>
-    <section id="symbols" hidden aria-label="擴充注音與拉丁字母"></section>
   </main>
+
+  <div id="popup" hidden role="listbox" aria-label="變體"></div>
 
   <footer>
     字典來源：教育部臺灣閩南語常用詞辭典、臺灣客家語常用詞辭典、重編國語辭典修訂本（目前為種子資料，詳見 README）。
