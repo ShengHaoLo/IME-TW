@@ -1,12 +1,10 @@
-import { Dictionary, buildEntries, candidates } from './engine.js';
+import { Dictionary, candidates } from './engine.js';
+import { loadDictionary } from './dictdata.js';
 import { LANGS, LANG_NAME, LANG_BADGE, ROWS, variantsFor, hasVariants, cycleList } from './layout.js';
-import { NAN_RAW, HAK_RAW, CMN_RAW } from '../data/dict.js';
 
-const dicts = {
-  nan: new Dictionary(buildEntries(NAN_RAW, 'nan')),
-  hak: new Dictionary(buildEntries(HAK_RAW, 'hak')),
-  cmn: new Dictionary(buildEntries(CMN_RAW, 'cmn')),
-};
+// Dictionaries load in the background; typing works (conversions only) before they arrive.
+const dicts = { nan: new Dictionary([]), hak: new Dictionary([]), cmn: new Dictionary([]) };
+const loading = new Set(LANGS);
 
 const $ = (id) => document.getElementById(id);
 const pad = $('pad');
@@ -358,9 +356,10 @@ function buildKeyboard() {
 
 function updateHint() {
   const order = state.order.map((l) => LANG_NAME[l]).join(' › ');
+  const status = loading.size ? `字典載入中（${[...loading].map((l) => LANG_NAME[l]).join('、')}）…` : '';
   $('hint').textContent = state.native
     ? '使用系統鍵盤：不進行轉換。'
-    : `優先順序：${order}。長按按鍵或 ⇧＋按鍵 選擇擴充字母，空白鍵選字。`;
+    : `${status}優先順序：${order}。長按按鍵或 ⇧＋按鍵 選擇擴充字母，空白鍵選字。`;
 }
 
 function setOrder(first) {
@@ -395,6 +394,13 @@ $('kbd').addEventListener('contextmenu', (e) => e.preventDefault());
 
 setNative(false);
 setOrder(state.order[0]);
+
+for (const lang of LANGS) {
+  loadDictionary(lang)
+    .then((d) => { dicts[lang] = d; })
+    .catch((err) => console.error(err))
+    .finally(() => { loading.delete(lang); updateHint(); refresh(); });
+}
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

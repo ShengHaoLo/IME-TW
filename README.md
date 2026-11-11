@@ -26,10 +26,12 @@ Limits: dictionary lookup ignores tones, and standard Bopomofo mixed with Latin 
 
 ## Dictionary
 
-`data/dict.js` is a **small hand-entered seed** for demonstrating the engine. Readings follow the Ministry of Education (Taiwan) dictionaries:
+Real Ministry of Education (Taiwan) data, imported from the g0v MOE-derived JSON mirrors by `tools/build-dict.mjs` (see `data/NOTICE.md` for sources, CC BY-ND 3.0 Taiwan licence and attribution):
 
-- 臺灣閩南語常用詞辭典 <https://sutian.moe.edu.tw/>
-- 臺灣客家語常用詞辭典 <https://hakka.dict.moe.edu.tw/>
-- 重編國語辭典修訂本 <https://dict.revised.moe.edu.tw/>
+- 臺灣閩南語常用詞辭典: ~16.7k Hokkien entries (Tâi-lô readings)
+- 臺灣客家語常用詞辭典: ~15k Hakka entries; matches all five dialects' spellings (四縣, 海陸, 大埔, 饒平, 詔安), shows 四縣
+- 重編國語辭典修訂本: ~157k Mandarin words up to 4 characters, found by pinyin or Zhuyin
 
-The seed has not been reviewed against these sources; Hakka tone/variant handling in particular is not implemented. Before relying on it, import the full MOE datasets (check each dataset's licence terms) and have the entries reviewed by native speakers. Indigenous languages are not yet included.
+Lookup ignores tones and hyphens (`taiuan` = `tai5-uan5`). Without word-frequency data, results are ranked exact match first, shorter words first. Dictionaries load in the background (about 7 MB, cached for offline use).
+
+The MOE site <https://mhi.moe.edu.tw/resource/index.html> could not be reached from the build environment, so the mirrors were used. **Indigenous (Formosan) languages are not included yet**: no openly licensed machine-readable source was found. Have the data reviewed by native speakers before relying on it.

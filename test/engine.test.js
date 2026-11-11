@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tlToTps, tlMarked, toLatinKey, candidates, Dictionary, buildEntries } from '../src/engine.js';
+import { readFileSync } from 'node:fs';
+import { tlToTps, tlMarked, toLatinKey, candidates } from '../src/engine.js';
+import { parseTsv } from '../src/dictdata.js';
 import { variantsFor, cycleList } from '../src/layout.js';
-import { NAN_RAW, HAK_RAW, CMN_RAW } from '../data/dict.js';
 
-const dicts = {
-  nan: new Dictionary(buildEntries(NAN_RAW, 'nan')),
-  hak: new Dictionary(buildEntries(HAK_RAW, 'hak')),
-  cmn: new Dictionary(buildEntries(CMN_RAW, 'cmn')),
-};
+const load = (lang) => parseTsv(readFileSync(new URL(`../data/${lang}.tsv`, import.meta.url), 'utf8'), lang);
+const dicts = { nan: load('nan'), hak: load('hak'), cmn: load('cmn') };
 
 test('TL to extended Bopomofo and tone marks', () => {
   assert.equal(tlToTps('tai5-uan5'), 'ㄉㄞˊ ㄨㄢˊ');
@@ -41,24 +39,43 @@ test('variants are ordered by language priority', () => {
 });
 
 test('candidates come from every language, primary first, with badges', () => {
-  const nanFirst = candidates('tsui2', dicts, ['nan', 'hak', 'cmn']);
-  assert.equal(nanFirst[0].text, '水');
-  assert.deepEqual(nanFirst[0].langs, ['nan']);
-  assert.ok(nanFirst.some((c) => c.text === 'ㄗㄨㄧˋ'));
+  const find = (buf, order, text) => candidates(buf, dicts, order).find((c) => c.text === text);
 
-  const shared = candidates('sui', dicts, ['hak', 'nan', 'cmn']).find((c) => c.text === '水');
-  assert.deepEqual(shared.langs, ['hak']);
+  const sui = find('sui', ['hak', 'nan', 'cmn'], '水');
+  assert.deepEqual(sui.langs, ['hak', 'nan']);
+  assert.match(sui.src, /教育部/);
+  // tone digits and hyphens are ignored; Hokkien readings keep their tone marks
+  assert.equal(find('tsui2', ['nan', 'hak', 'cmn'], '水').label, 'tsuí');
+  assert.ok(find('tsui2', ['nan', 'hak', 'cmn'], 'ㄗㄨㄧˋ'));
 
-  const hakFirst = candidates('sit', dicts, ['hak', 'nan', 'cmn']);
-  assert.equal(hakFirst[0].text, '食');
-  const cmn = candidates('taiwan', dicts, ['cmn', 'nan', 'hak']);
-  assert.equal(cmn[0].text, '臺灣');
-  assert.ok(cmn[0].langs.includes('cmn'));
+  // Hakka dialect spellings all match (Sixian "sui", Hailu "shui", Raoping "fi")
+  assert.ok(find('shui', ['hak', 'nan', 'cmn'], '水').langs.includes('hak'));
+  assert.ok(find('fi', ['hak', 'nan', 'cmn'], '水'));
+
+  // Language order decides which language's words come first
+  assert.ok(candidates('sui', dicts, ['hak', 'nan', 'cmn'])[0].langs.includes('hak'));
+  assert.ok(candidates('sui', dicts, ['nan', 'hak', 'cmn'])[0].langs.includes('nan'));
+  assert.ok(find('taiwan', ['cmn', 'nan', 'hak'], '臺灣').langs.includes('cmn'));
+});
+
+test('typed tone digits rank the matching Hokkien reading first; Hakka stops can be typed p/t/k', () => {
+  const nan = candidates('tsiah8', dicts, ['nan', 'hak', 'cmn']).filter((c) => c.langs.includes('nan'));
+  assert.equal(nan[0].text, '食');
+  assert.equal(nan[0].label, 'tsia̍h');
+  const hak = candidates('hakga', dicts, ['hak', 'nan', 'cmn']);
+  assert.ok(hak.some((c) => c.text === '客家' && c.langs.includes('hak')));
 });
 
 test('Zhuyin and explicit special characters', () => {
-  assert.equal(candidates('ㄋㄧˇ', dicts)[0].text, '你');
-  assert.equal(candidates('ㄊㄞ', dicts)[0].text, '臺灣');
+  assert.ok(candidates('ㄋㄧˇ', dicts).slice(0, 5).some((c) => c.text === '你'));
+  assert.ok(candidates('ㄊㄞㄨㄢ', dicts).some((c) => c.text === '臺灣'));
   // explicitly typed extended letters commit as typed first
   assert.equal(candidates('ㆠ', dicts)[0].text, 'ㆠ');
+});
+
+test('lookup ranks exact matches before completions', () => {
+  const c = candidates('tsui', dicts, ['nan', 'hak', 'cmn']);
+  const first = c.findIndex((x) => x.langs.includes('nan'));
+  assert.equal(first, 0);
+  assert.ok(c.length <= 40);
 });

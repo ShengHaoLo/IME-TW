@@ -128,29 +128,38 @@ export class Dictionary {
     this.sortedKeys = [...this.index.keys()].sort();
   }
 
-  // Exact matches first, then entries whose key starts with the buffer.
+  // Exact key matches first (file order: short words first), then completions of the key,
+  // nearest completion (shortest key) first.
   lookup(key, limit = 30) {
     if (!key) return [];
     const out = [...(this.index.get(key) || [])];
-    for (const k of this.sortedKeys) {
-      if (out.length >= limit) break;
-      if (k !== key && k.startsWith(key)) out.push(...this.index.get(k));
+    if (out.length < limit) {
+      const keys = this.sortedKeys;
+      let lo = 0;
+      let hi = keys.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (keys[mid] < key) lo = mid + 1; else hi = mid;
+      }
+      const near = [];
+      for (let i = lo; i < keys.length && keys[i].startsWith(key) && near.length < 200; i++) {
+        if (keys[i] !== key) near.push(keys[i]);
+      }
+      near.sort((a, b) => a.length - b.length);
+      for (const k of near) out.push(...this.index.get(k));
     }
     return [...new Set(out)].slice(0, limit);
   }
 }
 
-// Raw rows: [text, reading, source, pinyin?]. Mandarin is also findable by pinyin.
-export function buildEntries(raw, mode) {
-  return raw.map(([text, reading, src, pinyin]) => ({
-    text,
-    reading,
-    src,
-    keys: mode === 'cmn' ? [stripBpmfTone(reading), letters(pinyin || '')].filter(Boolean) : [letters(reading)],
-  }));
-}
-
 // ---- Candidate generation ----
+
+// With tone digits typed (tsiah8), put entries whose tone-marked reading matches exactly first.
+function preferTone(hits, buffer) {
+  const want = tlMarked(buffer).toLowerCase();
+  const norm = (r) => r.toLowerCase().replace(/\s+/g, '-');
+  return [...hits.filter((e) => norm(e.reading) === want), ...hits.filter((e) => norm(e.reading) !== want)];
+}
 
 // `order` is the user's language priority; hits from every language are shown, best-ranked first.
 export function candidates(buffer, dicts, order = LANGS, limit = 40) {
@@ -171,6 +180,7 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40) {
     let hits = [];
     if (bpmfOnly) hits = lang === 'cmn' ? dicts.cmn.lookup(stripBpmfTone(buffer)) : [];
     else if (latin) hits = dicts[lang].lookup(latin);
+    if (lang === 'nan' && /[1-9]/.test(buffer) && /^[A-Za-z0-9'-]+$/.test(buffer)) hits = preferTone(hits, buffer);
     for (const e of hits) add(e.text, e.reading, lang, e.src);
   }
   const dictList = [...merged.values()];

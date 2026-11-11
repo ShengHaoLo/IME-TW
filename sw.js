@@ -1,5 +1,5 @@
-const CACHE = 'ime-tw-v2';
-const ASSETS = ['./', 'index.html', 'style.css', 'src/app.js', 'src/engine.js', 'src/layout.js', 'data/dict.js', 'manifest.webmanifest', 'icons/icon.svg'];
+const CACHE = 'ime-tw-v3';
+const ASSETS = ['./', 'index.html', 'style.css', 'src/app.js', 'src/engine.js', 'src/layout.js', 'src/dictdata.js', 'manifest.webmanifest', 'icons/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
