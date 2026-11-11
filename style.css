@@ -24,6 +24,8 @@ h1 { font-size: 1.1rem; margin: 0 0 .4rem; }
 h1 small { color: var(--muted); font-weight: 400; }
 nav { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
 nav .label { color: var(--muted); font-size: .85rem; }
+nav button { padding: .25rem .65rem; }
+select { font: inherit; font-size: .85rem; color: inherit; background: var(--key); border: 1px solid var(--key-border); border-radius: 8px; padding: .3rem .4rem; max-width: 9rem; }
 button {
   font: inherit; color: inherit; background: var(--key); border: 1px solid var(--key-border);
   border-radius: 8px; padding: .35rem .8rem; cursor: pointer; touch-action: manipulation;

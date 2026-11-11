@@ -1,9 +1,11 @@
 import { Dictionary, candidates } from './engine.js';
 import { loadDictionary } from './dictdata.js';
-import { LANGS, LANG_NAME, LANG_BADGE, ROWS, variantsFor, hasVariants, cycleList } from './layout.js';
+import {
+  LANGS, LANG_NAME, LANG_BADGE, IND_LANGS, ROWS, SYM_ROWS, FULLWIDTH, QUOTES, variantsFor, hasVariants, cycleList,
+} from './layout.js';
 
 // Dictionaries load in the background; typing works (conversions only) before they arrive.
-const dicts = { nan: new Dictionary([]), hak: new Dictionary([]), cmn: new Dictionary([]) };
+const dicts = Object.fromEntries(LANGS.map((l) => [l, new Dictionary([])]));
 const loading = new Set(LANGS);
 
 const $ = (id) => document.getElementById(id);
@@ -18,15 +20,27 @@ const state = {
   cands: [],
   sel: 0,
   shift: false,   // on-screen Shift latch (variant cycling)
-  caps: false,    // one-shot capital
-  cycle: null,    // {key, i, len, upper}: last Shift-cycle, valid until anything else happens
+  caps: false,    // capital for the next letter (or until switched off when locked)
+  lock: false,    // caps locked (double-tap Aa)
+  cycle: null,    // {key, i, len, upper, direct}: last Shift-cycle, valid until anything else happens
   native: false,
+  layer: 'abc',   // 'abc' letters | 'sym' punctuation and symbols
+  fullwidth: true, // type full-width punctuation (，。？) while converting
+  ind: 'ami',     // the Indigenous language whose word list is used
 };
 
-try {
-  const saved = JSON.parse(localStorage.getItem('ime-tw-order'));
-  if (Array.isArray(saved) && saved.length === LANGS.length && LANGS.every((l) => saved.includes(l))) state.order = saved;
-} catch { /* ignore */ }
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(`ime-tw-${k}`)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(`ime-tw-${k}`, JSON.stringify(v)); } catch { /* ignore */ } },
+};
+
+const savedOrder = store.get('order');
+if (Array.isArray(savedOrder)) {
+  const known = savedOrder.filter((l) => LANGS.includes(l));
+  state.order = [...new Set([...known, ...LANGS])];
+}
+if (IND_LANGS.some(([c]) => c === store.get('ind'))) state.ind = store.get('ind');
+if (store.get('fullwidth') === false) state.fullwidth = false;
 
 const graphemes = (s) => (typeof Intl.Segmenter === 'function'
   ? Array.from(new Intl.Segmenter().segment(s), (x) => x.segment)
@@ -49,16 +63,47 @@ function deleteBeforeCaret() {
   pad.dispatchEvent(new Event('input'));
 }
 
-// With conversion on, characters go to the composing buffer; off, straight into the text.
+// Letters, tone marks and the apostrophe/hyphen/^ used in spellings belong to the composing buffer;
+// punctuation and symbols commit it and go straight into the text.
+const BUFFERABLE = /^[\p{L}\p{M}\p{Sk}0-9'-]/u;
+
+// Returns true when the text went straight into the text area (needed to undo it when cycling).
 function emit(text) {
-  if (state.on) { state.buffer += text; refresh(); } else insert(text);
+  if (state.on && BUFFERABLE.test(text)) { state.buffer += text; refresh(); return false; }
+  if (state.on && state.buffer) commit();
+  insert(text);
+  return true;
 }
 
-function retract(len) {
-  if (state.on) { state.buffer = state.buffer.slice(0, -len); refresh(); } else {
+function retract(len, direct) {
+  if (!direct) { state.buffer = state.buffer.slice(0, -len); refresh(); } else {
     const s = pad.selectionStart;
     pad.setRangeText('', s - len, s, 'end');
+    pad.dispatchEvent(new Event('input'));
   }
+}
+
+const prevChar = () => pad.value[pad.selectionStart - 1] ?? '';
+
+// Typed punctuation: full-width in Chinese mode, but "3.14" and "10:30" keep their half-width marks.
+function punctText(ch) {
+  if (!state.fullwidth) return ch;
+  if (QUOTES[ch]) return QUOTES[ch][/^$|[\s（「『【《“‘([]/.test(prevChar()) ? 0 : 1];
+  if (/\d/.test(prevChar()) && /[.,:]/.test(ch)) return ch;
+  return FULLWIDTH[ch] ?? ch;
+}
+
+function typePunct(ch) {
+  state.cycle = null;
+  if (state.on && state.buffer) commit();
+  insert(state.on ? punctText(ch) : ch);
+}
+
+function moveCaret(d) {
+  state.cycle = null;
+  if (state.buffer) commit();
+  const p = Math.max(0, Math.min(pad.value.length, pad.selectionStart + d));
+  pad.setSelectionRange(p, p);
 }
 
 // ---- Composition ----
@@ -115,7 +160,7 @@ function commitRaw() {
 function typePlain(c) {
   state.cycle = null;
   if (!state.on) { insert(c); return; }
-  if (/[A-Za-z]/.test(c) || (state.buffer && /[0-9'-]/.test(c))) { state.buffer += c; refresh(); return; }
+  if (/[A-Za-z]/.test(c) || c === "'" || (state.buffer && /[0-9^-]/.test(c))) { state.buffer += c; refresh(); return; }
   if (state.buffer) commit();
   insert(c);
 }
@@ -127,14 +172,14 @@ function cycleVariant(key) {
   let upper = state.caps;
   const c = state.cycle;
   if (c && c.key === key) {
-    retract(c.len);
+    retract(c.len, c.direct);
     i = (c.i + 1) % list.length;
     upper = c.upper;
   }
-  setCaps(false);
+  releaseCaps();
   const text = upper ? list[i].toUpperCase() : list[i];
-  emit(text);
-  state.cycle = { key, i, len: text.length, upper };
+  const direct = emit(text);
+  state.cycle = { key, i, len: text.length, upper, direct };
 }
 
 // Non-character keys. Returns true when handled.
@@ -159,17 +204,17 @@ function press(key) {
 
 const MODIFIERS = ['Shift', 'CapsLock', 'Control', 'Alt', 'Meta', 'AltGraph'];
 
-// Physical keyboard. Shift+key cycles variants; CapsLock gives capitals.
+// Physical keyboard. Shift+letter cycles variants; CapsLock gives capitals; Shift+digit/punctuation types
+// the usual symbols (full-width in Chinese mode).
 pad.addEventListener('keydown', (e) => {
   if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || MODIFIERS.includes(e.key)) return;
-  const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(e.code);
-  if (m) {
-    const base = (m[1] || m[2]).toLowerCase();
-    if (e.shiftKey && hasVariants(base)) { e.preventDefault(); cycleVariant(base); return; }
-    if (state.on && /^[A-Za-z0-9]$/.test(e.key)) { e.preventDefault(); typePlain(e.key); return; }
+  const m = /^Key([A-Z])$/.exec(e.code);
+  if (m && e.shiftKey && hasVariants(m[1].toLowerCase())) { e.preventDefault(); cycleVariant(m[1].toLowerCase()); return; }
+  if (state.on) {
+    if (/^[A-Za-z0-9]$/.test(e.key) || e.key === "'" || (state.buffer && /^[-^]$/.test(e.key))) { e.preventDefault(); typePlain(e.key); return; }
+    if (FULLWIDTH[e.key] || e.key === '"') { e.preventDefault(); typePunct(e.key); return; }
+    if (state.buffer && e.key.length === 1 && e.key !== ' ') { commit(); return; }
   }
-  if (state.on && state.buffer && /^['-]$/.test(e.key)) { e.preventDefault(); typePlain(e.key); return; }
-  if (state.on && state.buffer && e.key.length === 1 && e.key !== ' ') { commit(); return; }
   if (press(e.key)) e.preventDefault();
 });
 pad.addEventListener('click', () => { state.cycle = null; });
@@ -186,24 +231,45 @@ function setShift(on) {
 
 function setCaps(on) {
   state.caps = on;
+  if (!on) state.lock = false;
   capsBtn?.setAttribute('aria-pressed', String(on));
+  if (capsBtn) capsBtn.textContent = state.lock ? 'AA' : 'Aa';
   $('kbd').classList.toggle('caps', on);
 }
 
-function tapKey(base) {
+// A one-shot capital ends after a key; a locked one (double-tap Aa) stays.
+function releaseCaps() {
+  if (!state.lock) setCaps(false);
+}
+
+let lastCapsTap = 0;
+
+function toggleCaps() {
+  const now = Date.now();
+  if (state.caps && !state.lock && now - lastCapsTap < 400) {
+    state.lock = true;
+    setCaps(true);
+  } else setCaps(!state.caps);
+  lastCapsTap = now;
+}
+
+// `tap` types the key's own character when it is neither cycled nor popped up.
+function tapKey(base, tap = typePlain) {
   if (state.shift && hasVariants(base)) {
     if (!state.cycle || state.cycle.key === base) { cycleVariant(base); return; }
   }
   setShift(false);
   const c = state.caps && /[a-z]/.test(base) ? base.toUpperCase() : base;
-  setCaps(false);
-  typePlain(c);
+  releaseCaps();
+  tap(c);
 }
+
+const tapSymbol = (c) => { state.cycle = null; emit(c); };
 
 function pickVariant(text) {
   state.cycle = null;
   setShift(false);
-  setCaps(false);
+  releaseCaps();
   emit(text);
 }
 
@@ -243,7 +309,7 @@ const itemAt = (x, y) => {
 };
 
 // A character key: tap types it; long-press opens the variant popup (release over one to choose it).
-function characterKey(base) {
+function characterKey(base, tap = typePlain) {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'key';
@@ -283,7 +349,7 @@ function characterKey(base) {
     active = false;
     clearTimeout(timer);
     b.classList.remove('down');
-    if (!opened) { if (!cancelled) tapKey(base); return; }
+    if (!opened) { if (!cancelled) tapKey(base, tap); return; }
     const hit = cancelled ? null : itemAt(e.clientX, e.clientY);
     // Released elsewhere: leave the popup open so a variant can still be tapped.
     if (hit) { pickVariant(hit.textContent); hidePopup(); }
@@ -331,23 +397,49 @@ function buildKeyboard() {
   });
   shiftBtn.setAttribute('aria-label', '變體切換 Shift');
   shiftBtn.setAttribute('aria-pressed', String(state.shift));
-  capsBtn = actionKey('Aa', 'fn', () => setCaps(!state.caps));
+  capsBtn = actionKey(state.lock ? 'AA' : 'Aa', 'fn', toggleCaps);
   capsBtn.setAttribute('aria-pressed', String(state.caps));
+  capsBtn.setAttribute('aria-label', '大寫（連點兩下鎖定）');
 
-  const chars = (s) => [...s].map(characterKey);
+  const chars = (s, tap) => [...s].map((c) => characterKey(c, tap));
+  const layer = (name) => () => { state.layer = name; state.cycle = null; setShift(false); buildKeyboard(); };
+  const enter = actionKey('↵', 'fn', () => { if (!press('Enter')) insert('\n'); });
+  const space = actionKey('空白 / 選字', 'wide', () => { if (!press(' ')) insert(' '); });
+  const back = actionKey('⌫', 'fn', backspace, { repeat: true });
+
+  if (state.layer === 'sym') {
+    const fw = actionKey(state.fullwidth ? '全' : '半', 'fn', () => setFullwidth(!state.fullwidth));
+    fw.setAttribute('aria-label', '全形／半形標點');
+    $('kbd').replaceChildren(
+      row(...chars(SYM_ROWS[0], tapSymbol)),
+      row(...chars(SYM_ROWS[1], tapSymbol)),
+      row(...chars(SYM_ROWS[2], tapSymbol)),
+      row(shiftBtn, ...chars(SYM_ROWS[3], tapSymbol), back),
+      row(
+        actionKey('ABC', 'fn', layer('abc')),
+        fw,
+        actionKey('←', 'fn', () => moveCaret(-1), { repeat: true }),
+        space,
+        actionKey('→', 'fn', () => moveCaret(1), { repeat: true }),
+        enter,
+      ),
+    );
+    return;
+  }
   $('kbd').replaceChildren(
     row(...chars(ROWS[0])),
     row(...chars(ROWS[1])),
     row(...chars(ROWS[2])),
-    row(shiftBtn, ...chars(ROWS[3]), actionKey('⌫', 'fn', backspace, { repeat: true })),
+    row(shiftBtn, ...chars(ROWS[3]), back),
     row(
       capsBtn,
-      actionKey(',', '', () => { press(','); typePlain(','); }),
-      actionKey('-', '', () => { setShift(false); typePlain('-'); }),
-      actionKey('空白 / 選字', 'wide', () => { if (!press(' ')) insert(' '); }),
-      actionKey('.', '', () => { press('.'); typePlain('.'); }),
-      actionKey('↹', 'fn', () => press('ArrowRight')),
-      actionKey('↵', 'fn', () => { if (!press('Enter')) insert('\n'); }),
+      actionKey('符', 'fn', layer('sym')),
+      characterKey(',', typePunct),
+      characterKey("'"),
+      space,
+      characterKey('-'),
+      characterKey('.', typePunct),
+      enter,
     ),
   );
 }
@@ -355,18 +447,44 @@ function buildKeyboard() {
 // ---- Settings ----
 
 function updateHint() {
-  const order = state.order.map((l) => LANG_NAME[l]).join(' › ');
+  const indName = IND_LANGS.find(([c]) => c === state.ind)[1];
+  const order = state.order.map((l) => (l === 'ind' ? `族語（${indName}）` : LANG_NAME[l])).join(' › ');
   const status = loading.size ? `字典載入中（${[...loading].map((l) => LANG_NAME[l]).join('、')}）…` : '';
   $('hint').textContent = state.native
     ? '使用系統鍵盤：不進行轉換。'
-    : `${status}優先順序：${order}。長按按鍵或 ⇧＋按鍵 選擇擴充字母，空白鍵選字。`;
+    : `${status}優先順序：${order}。長按按鍵或 ⇧＋按鍵 選擇擴充字母與標點，空白鍵選字。`;
 }
 
 function setOrder(first) {
   state.order = [first, ...LANGS.filter((l) => l !== first)];
-  try { localStorage.setItem('ime-tw-order', JSON.stringify(state.order)); } catch { /* ignore */ }
+  store.set('order', state.order);
   for (const b of document.querySelectorAll('#langs button')) b.setAttribute('aria-pressed', String(b.dataset.lang === first));
   buildKeyboard();
+  updateHint();
+  refresh();
+}
+
+function setFullwidth(on) {
+  state.fullwidth = on;
+  store.set('fullwidth', on);
+  $('toggle-fw').setAttribute('aria-pressed', String(on));
+  if (state.layer === 'sym') buildKeyboard();
+}
+
+let indToken = 0;
+
+async function setInd(code) {
+  state.ind = code;
+  store.set('ind', code);
+  $('ind-lang').value = code;
+  const token = ++indToken;
+  loading.add('ind');
+  updateHint();
+  let d = new Dictionary([]);
+  try { d = await loadDictionary('ind', `ind/${code}`); } catch (err) { console.error(err); }
+  if (token !== indToken) return; // a newer choice is loading
+  dicts.ind = d;
+  loading.delete('ind');
   updateHint();
   refresh();
 }
@@ -380,12 +498,15 @@ function setNative(on) {
   updateHint();
 }
 
+$('ind-lang').replaceChildren(...IND_LANGS.map(([code, name]) => new Option(name, code)));
+$('ind-lang').addEventListener('change', (e) => setInd(e.target.value));
 for (const b of document.querySelectorAll('#langs button')) b.addEventListener('click', () => setOrder(b.dataset.lang));
 $('toggle-ime').addEventListener('click', (e) => {
   commitRaw();
   state.on = !state.on;
   e.currentTarget.setAttribute('aria-pressed', String(state.on));
 });
+$('toggle-fw').addEventListener('click', () => setFullwidth(!state.fullwidth));
 $('toggle-native').addEventListener('click', () => setNative(!state.native));
 $('copy').addEventListener('click', () => navigator.clipboard?.writeText(pad.value));
 $('clear').addEventListener('click', () => { pad.value = ''; state.buffer = ''; state.cycle = null; refresh(); pad.focus(); });
@@ -393,14 +514,16 @@ document.addEventListener('pointerdown', (e) => { if (!popup.hidden && !popup.co
 $('kbd').addEventListener('contextmenu', (e) => e.preventDefault());
 
 setNative(false);
+setFullwidth(state.fullwidth);
 setOrder(state.order[0]);
 
-for (const lang of LANGS) {
+for (const lang of LANGS.filter((l) => l !== 'ind')) {
   loadDictionary(lang)
     .then((d) => { dicts[lang] = d; })
     .catch((err) => console.error(err))
     .finally(() => { loading.delete(lang); updateHint(); refresh(); });
 }
+setInd(state.ind);
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

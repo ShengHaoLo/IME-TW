@@ -1,6 +1,7 @@
 // Input engine: script conversion + dictionary lookup. No DOM access, so it is testable in Node.
 
-export const LANGS = ['nan', 'hak', 'cmn'];
+// nan Hokkien, hak Hakka, cmn Mandarin, ind the selected Indigenous language, eng English.
+export const LANGS = ['nan', 'hak', 'cmn', 'ind', 'eng'];
 
 // ---- Taiwanese Hokkien: Tâi-lô (TL) -> Taiwan Phonetic Symbols (extended Bopomofo) ----
 
@@ -109,7 +110,7 @@ const letters = (s) => s.toLowerCase().replace(/[^a-z]/g, '');
 
 // Toneless lowercase Latin lookup key: o͘ -> oo, ⁿ -> nn, tone marks and tone digits dropped.
 export function toLatinKey(buffer) {
-  let s = buffer.replace(/o\u0358/gi, 'oo').replace(/ⁿ/g, 'nn');
+  let s = buffer.replace(/o\u0358/gi, 'oo').replace(/ⁿ/g, 'nn').replace(/ʉ/gi, 'u').replace(/ɨ/gi, 'i');
   s = [...s].map((c) => EXT_TO_TL[c] ?? c).join('');
   return letters(s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
 }
@@ -119,6 +120,7 @@ export function toLatinKey(buffer) {
 export class Dictionary {
   constructor(entries) {
     this.index = new Map();
+    entries.forEach((e, i) => { e.o = i; });
     for (const e of entries) {
       for (const k of e.keys) {
         if (!this.index.has(k)) this.index.set(k, []);
@@ -128,8 +130,8 @@ export class Dictionary {
     this.sortedKeys = [...this.index.keys()].sort();
   }
 
-  // Exact key matches first (file order: short words first), then completions of the key,
-  // nearest completion (shortest key) first.
+  // Exact key matches first (file order: short or frequent words first), then completions of the key,
+  // nearest completion (shortest key, then file order) first.
   lookup(key, limit = 30) {
     if (!key) return [];
     const out = [...(this.index.get(key) || [])];
@@ -142,10 +144,10 @@ export class Dictionary {
         if (keys[mid] < key) lo = mid + 1; else hi = mid;
       }
       const near = [];
-      for (let i = lo; i < keys.length && keys[i].startsWith(key) && near.length < 200; i++) {
+      for (let i = lo; i < keys.length && keys[i].startsWith(key) && near.length < 3000; i++) {
         if (keys[i] !== key) near.push(keys[i]);
       }
-      near.sort((a, b) => a.length - b.length);
+      near.sort((a, b) => a.length - b.length || this.index.get(a)[0].o - this.index.get(b)[0].o);
       for (const k of near) out.push(...this.index.get(k));
     }
     return [...new Set(out)].slice(0, limit);
@@ -161,11 +163,16 @@ function preferTone(hits, buffer) {
   return [...hits.filter((e) => norm(e.reading) === want), ...hits.filter((e) => norm(e.reading) !== want)];
 }
 
-// `order` is the user's language priority; hits from every language are shown, best-ranked first.
+const PER_LANG = 6; // completions shown per language before the rest, so no language crowds out the others
+const capitalise = (t) => t[0].toUpperCase() + t.slice(1);
+
+// `order` is the user's language priority; hits from every language are shown, best-ranked first:
+// the primary language's matches, other languages' exact matches, a few completions each, then the remainder.
 export function candidates(buffer, dicts, order = LANGS, limit = 40) {
   if (!buffer) return [];
   const merged = new Map();
   const add = (text, label, lang, src) => {
+    if ((lang === 'eng' || lang === 'ind') && /^[A-Z]/.test(buffer) && /^[a-z]/.test(text)) text = capitalise(text);
     let c = merged.get(text);
     if (!c) {
       c = { text, label, src, langs: [] };
@@ -176,15 +183,32 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40) {
 
   const bpmfOnly = STD_BPMF.test(buffer) && !/[a-z]/i.test(buffer);
   const latin = bpmfOnly ? '' : toLatinKey(buffer);
+  const first = [];
+  const exact = [];
+  const near = [];
+  const rest = [];
   for (const lang of order) {
+    const dict = dicts[lang];
     let hits = [];
-    if (bpmfOnly) hits = lang === 'cmn' ? dicts.cmn.lookup(stripBpmfTone(buffer)) : [];
-    else if (latin) hits = dicts[lang].lookup(latin);
+    if (!dict) hits = [];
+    else if (bpmfOnly) hits = lang === 'cmn' ? dict.lookup(stripBpmfTone(buffer)) : [];
+    else if (latin) hits = dict.lookup(latin);
     if (lang === 'nan' && /[1-9]/.test(buffer) && /^[A-Za-z0-9'-]+$/.test(buffer)) hits = preferTone(hits, buffer);
-    for (const e of hits) add(e.text, e.reading, lang, e.src);
+    const key = bpmfOnly ? stripBpmfTone(buffer) : latin;
+    const isExact = (e) => e.keys.includes(key);
+    const ex = hits.filter(isExact);
+    const others = hits.filter((e) => !isExact(e));
+    if (lang === order[0]) {
+      first.push(...ex.map((e) => [e, lang]), ...others.slice(0, PER_LANG).map((e) => [e, lang]));
+      rest.push(...others.slice(PER_LANG).map((e) => [e, lang]));
+      continue;
+    }
+    exact.push(...ex.map((e) => [e, lang]));
+    near.push(...others.slice(0, PER_LANG).map((e) => [e, lang]));
+    rest.push(...others.slice(PER_LANG).map((e) => [e, lang]));
   }
+  for (const [e, lang] of [...first, ...exact, ...near, ...rest]) add(e.text, e.reading, lang, e.src);
   const dictList = [...merged.values()];
-
   const extras = [];
   if (/^[A-Za-z0-9'-]+$/.test(buffer)) {
     const tps = tlToTps(buffer);

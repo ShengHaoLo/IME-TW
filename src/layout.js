@@ -4,10 +4,18 @@
 import { LANGS } from './engine.js';
 
 export { LANGS };
-export const LANG_NAME = { nan: '臺語', hak: '客語', cmn: '華語' };
-export const LANG_BADGE = { nan: '臺', hak: '客', cmn: '華' };
+export const LANG_NAME = { nan: '臺語', hak: '客語', cmn: '華語', ind: '族語', eng: '英語' };
+export const LANG_BADGE = { nan: '臺', hak: '客', cmn: '華', ind: '原', eng: '英' };
+
+// The Indigenous languages of Taiwan; each has a word list at data/ind/<code>.tsv.
+export const IND_LANGS = [
+  ['ami', '阿美語'], ['tay', '泰雅語'], ['bnn', '布農語'], ['pwn', '排灣語'], ['dru', '魯凱語'], ['pyu', '卑南語'],
+  ['tsu', '鄒語'], ['xsy', '賽夏語'], ['tao', '雅美（達悟）語'], ['ssf', '邵語'], ['ckv', '噶瑪蘭語'], ['trk', '太魯閣語'],
+  ['szy', '撒奇萊雅語'], ['xnb', '卡那卡那富語'], ['sxr', '拉阿魯哇語'], ['trv', '賽德克語'],
+];
 
 const ALL = 'nan hak cmn';
+const EVERY = 'nan hak cmn ind eng';
 
 // Tone marks as combining characters, with the languages that use them.
 const MARKS = [
@@ -26,7 +34,7 @@ const EXTRA = {
   f: [['ㄈ', 'cmn']],
   g: [['ㆣ', 'nan'], ['ㆸ', 'nan'], ['ㆻ', 'nan'], ['ㆼ', 'nan'], ['ㄍ', 'nan cmn']],
   h: [['ㆷ', 'nan'], ['ㄏ', 'nan cmn']],
-  i: [['ㆪ', 'nan'], ['ㆨ', 'nan'], ['ㆳ', 'nan'], ['ㄧ', 'nan cmn'], ['ɨ', 'hak']],
+  i: [['ㆪ', 'nan'], ['ㆨ', 'nan'], ['ㆳ', 'nan'], ['ㄧ', 'nan cmn'], ['ɨ', 'hak ind']],
   j: [['ㆡ', 'nan'], ['ㆢ', 'nan'], ['ㄐ', 'cmn']],
   k: [['ㆶ', 'nan'], ['ㆽ', 'nan'], ['ㄎ', 'nan cmn']],
   l: [['ㆹ', 'nan'], ['ㄌ', 'nan cmn']],
@@ -35,10 +43,10 @@ const EXTRA = {
   o: [['ㆦ', 'nan'], ['ㆧ', 'nan'], ['o\u0358', 'nan'], ['ㆲ', 'nan'], ['ㆾ', 'nan'], ['ㄛ', 'cmn'], ['ㄡ', 'cmn']],
   p: [['ㆴ', 'nan'], ['ㄆ', 'nan cmn']],
   q: [['ㄑ', 'cmn']],
-  r: [['ㄖ', 'cmn']],
+  r: [['r\u0331', 'ind'], ['ㄖ', 'cmn']],
   s: [['ㄙ', 'nan cmn'], ['ㄕ', 'cmn']],
   t: [['ㆵ', 'nan'], ['ㄊ', 'nan cmn']],
-  u: [['ㆫ', 'nan'], ['ṳ', 'hak'], ['ㄨ', 'nan cmn'], ['ü', 'cmn']],
+  u: [['ㆫ', 'nan'], ['ṳ', 'hak'], ['ʉ', 'ind'], ['ㄨ', 'nan cmn'], ['ü', 'cmn']],
   x: [['ㄒ', 'cmn']],
   y: [['ㄩ', 'cmn']],
   z: [['ㆺ', 'nan'], ['ㄗ', 'nan cmn'], ['ㄓ', 'cmn']],
@@ -49,6 +57,24 @@ const EXTRA = {
   7: [['˫', 'nan']],
   8: [['˙', 'nan']],
 };
+
+// Punctuation and symbols: the key shown is the base; the variants are its width forms and relatives.
+const PUNCT = {
+  '，': ',、﹐', '。': '.．｡', '、': '\\､', '？': '?¿', '！': '!¡', '：': ':︰', '；': ';', '…': '⋯‥...', '～': '~〜∼', '—': '-–─－ー',
+  '「': '『﹁', '」': '』﹂', '『': '「﹃', '』': '」﹄', '（': '(［｛', '）': ')］｝', '【': '[〔〖［', '】': ']〕〗］',
+  '《': '〈<＜', '》': '〉>＞', '“': '"＂„', '”': '"＂', '‘': "'‚", '’': "'",
+  '(': '（', ')': '）', '[': '［【〔', ']': '］】〕', '{': '｛｢', '}': '｝｣',
+  '@': '＠', '#': '＃№', $: '¥€£¢', '%': '‰％', '&': '＆', '*': '＊×★☆', '+': '±＋', '=': '≠≈＝', '/': '\\|／',
+  ',': '，、', '.': '。．…‧·', '-': '—–～－ー', "'": '^’ʼ‘', '?': '？¿', '!': '！¡', ':': '：；', ';': '；',
+};
+for (const [key, list] of Object.entries(PUNCT)) EXTRA[key] = [...list].map((c) => [c, EVERY]);
+
+// Full-width forms typed in Chinese mode. Quotes alternate open/close and are handled by the app.
+export const FULLWIDTH = {
+  ',': '，', '.': '。', '?': '？', '!': '！', ':': '：', ';': '；', '(': '（', ')': '）', '[': '【', ']': '】',
+  '{': '｛', '}': '｝', '<': '《', '>': '》', '\\': '、', '~': '～', '^': '……', _: '——', '`': '‧',
+};
+export const QUOTES = { '"': ['“', '”'], "'": ['‘', '’'] };
 
 function rank(langs, order) {
   return Math.min(...langs.map((l) => order.indexOf(l)).filter((i) => i >= 0), order.length);
@@ -70,3 +96,4 @@ export const hasVariants = (key) => (EXTRA[key] || MARKED_BASES.includes(key)) ?
 export const cycleList = (key, order = LANGS) => [...variantsFor(key, order).map((v) => v.text), key];
 
 export const ROWS = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+export const SYM_ROWS = ['，。、？！：；…～—', '「」『』（）【】《》', '“”‘’()[]{}', '@#$%&*+=/'];

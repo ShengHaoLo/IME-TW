@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { tlToTps, tlMarked, toLatinKey, candidates } from '../src/engine.js';
 import { parseTsv } from '../src/dictdata.js';
-import { variantsFor, cycleList } from '../src/layout.js';
+import { variantsFor, cycleList, FULLWIDTH } from '../src/layout.js';
 
 const load = (lang) => parseTsv(readFileSync(new URL(`../data/${lang}.tsv`, import.meta.url), 'utf8'), lang);
-const dicts = { nan: load('nan'), hak: load('hak'), cmn: load('cmn') };
+const loadFile = (lang, file) => parseTsv(readFileSync(new URL(`../data/${file}.tsv`, import.meta.url), 'utf8'), lang);
+const dicts = { nan: load('nan'), hak: load('hak'), cmn: load('cmn'), ind: loadFile('ind', 'ind/ami'), eng: loadFile('eng', 'eng') };
 
 test('TL to extended Bopomofo and tone marks', () => {
   assert.equal(tlToTps('tai5-uan5'), 'ㄉㄞˊ ㄨㄢˊ');
@@ -78,4 +79,37 @@ test('lookup ranks exact matches before completions', () => {
   const first = c.findIndex((x) => x.langs.includes('nan'));
   assert.equal(first, 0);
   assert.ok(c.length <= 40);
+});
+
+test('English vocabulary: common words, frequency order, capitalisation follows the buffer', () => {
+  const c = candidates('hel', dicts, ['eng', 'nan', 'hak', 'cmn']);
+  assert.ok(c.some((x) => x.text === 'help' && x.langs.includes('eng')));
+  const top = candidates('the', dicts, ['eng', 'nan', 'hak', 'cmn'])[0];
+  assert.equal(top.text, 'the');
+  assert.equal(candidates('Hello', dicts, ['eng', 'nan', 'hak', 'cmn'])[0].text, 'Hello');
+  assert.ok(!candidates('fuck', dicts).some((x) => x.langs.includes('eng')));
+});
+
+test('Indigenous words: typed with plain or special letters, shown with Chinese gloss', () => {
+  const ami = candidates('cecay', dicts, ['ind', 'nan', 'hak', 'cmn']);
+  assert.equal(ami[0].text, 'cecay');
+  assert.equal(ami[0].label, '一');
+  assert.deepEqual(ami[0].langs, ['ind']);
+  // ʉ is folded to u, so typing either spelling reaches the same word
+  const sxr = loadFile('ind', 'ind/sxr');
+  const words = sxr.lookup('u', 200).map((e) => e.text).filter((t) => t.includes('ʉ'));
+  assert.ok(words.length > 0);
+  assert.ok(sxr.lookup(toLatinKey(words[0])).some((e) => e.text === words[0]));
+  assert.equal(toLatinKey('rʉ'), 'ru');
+  // the primary language's completions come before other languages' exact matches
+  assert.ok(candidates('ru', { ...dicts, ind: sxr }, ['ind', 'nan', 'hak', 'cmn', 'eng'])[0].langs.includes('ind'));
+  assert.ok(variantsFor('u', ['ind', 'nan', 'hak', 'cmn'])[0].text === 'ʉ');
+});
+
+test('full-width punctuation table and punctuation variants', () => {
+  assert.equal(FULLWIDTH[','], '，');
+  assert.equal(FULLWIDTH['.'], '。');
+  assert.equal(FULLWIDTH['?'], '？');
+  assert.ok(variantsFor('，').some((v) => v.text === ','));
+  assert.equal(cycleList('.').at(-1), '.');
 });
