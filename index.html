@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6f5c">
+  <title>臺灣語言輸入法 IME-TW</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>臺灣語言輸入法 <small>IME-TW</small></h1>
+    <nav id="modes" role="tablist" aria-label="輸入語言">
+      <button role="tab" data-mode="nan" aria-selected="true">臺語 TL</button>
+      <button role="tab" data-mode="hak" aria-selected="false">客語 Pinyin</button>
+      <button role="tab" data-mode="cmn" aria-selected="false">華語 ㄅㄆㄇ</button>
+      <button role="tab" data-mode="raw" aria-selected="false">直接輸入</button>
+    </nav>
+  </header>
+
+  <main>
+    <textarea id="pad" placeholder="在這裡寫下你的故事… Write your story here…" aria-label="書寫區" spellcheck="false" autofocus></textarea>
+
+    <div id="composer" aria-live="polite">
+      <div id="buffer"></div>
+      <ol id="cands"></ol>
+    </div>
+
+    <div id="hint"></div>
+
+    <section id="kbd" aria-label="螢幕鍵盤"></section>
+
+    <div class="tools">
+      <button id="toggle-symbols" aria-pressed="false">符號 ㆠㆣㆦ ô͘</button>
+      <button id="toggle-native" aria-pressed="false">使用系統鍵盤</button>
+      <button id="copy">複製</button>
+      <button id="clear">清除</button>
+    </div>
+    <section id="symbols" hidden aria-label="擴充注音與拉丁字母"></section>
+  </main>
+
+  <footer>
+    字典來源：教育部臺灣閩南語常用詞辭典、臺灣客家語常用詞辭典、重編國語辭典修訂本（目前為種子資料，詳見 README）。
+  </footer>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

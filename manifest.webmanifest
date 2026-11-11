@@ -1,0 +1,10 @@
+{
+  "name": "臺灣語言輸入法 IME-TW",
+  "short_name": "IME-TW",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#1f6f5c",
+  "lang": "zh-Hant-TW",
+  "icons": [{ "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
