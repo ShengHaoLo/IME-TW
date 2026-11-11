@@ -1,4 +1,4 @@
-const CACHE = 'ime-tw-v4';
+const CACHE = 'ime-tw-v5';
 const ASSETS = ['./', 'index.html', 'style.css', 'src/app.js', 'src/engine.js', 'src/layout.js', 'src/dictdata.js', 'manifest.webmanifest', 'icons/icon.svg'];
 
 self.addEventListener('install', (e) => {

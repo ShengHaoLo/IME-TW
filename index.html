@@ -12,15 +12,8 @@
 <body>
   <header>
     <h1>臺灣語言輸入法 <small>IME-TW</small></h1>
-    <nav id="langs" role="group" aria-label="優先語言">
-      <span class="label">優先語言</span>
-      <button data-lang="nan" aria-pressed="true">臺語</button>
-      <button data-lang="hak" aria-pressed="false">客語</button>
-      <button data-lang="cmn" aria-pressed="false">華語</button>
-      <button data-lang="ind" aria-pressed="false">族語</button>
-      <select id="ind-lang" aria-label="族語語別"></select>
-      <button data-lang="eng" aria-pressed="false">英語</button>
-    </nav>
+    <button id="menu-btn" aria-haspopup="dialog">☰ 選單</button>
+    <button id="prio-strip" title="語言優先順序：長按空白鍵或點此調整"></button>
   </header>
 
   <main>
@@ -35,14 +28,28 @@
 
     <section id="kbd" aria-label="螢幕鍵盤"></section>
 
-    <div class="tools">
-      <button id="toggle-ime" aria-pressed="true">轉換</button>
-      <button id="toggle-fw" aria-pressed="true">全形標點</button>
-      <button id="toggle-native" aria-pressed="false">系統鍵盤</button>
-      <button id="copy">複製</button>
-      <button id="clear">清除</button>
-    </div>
   </main>
+
+  <ol id="prio-pop" class="prio" hidden aria-label="語言優先順序"></ol>
+
+  <div id="menu" hidden role="dialog" aria-modal="true" aria-label="選單">
+    <div class="sheet">
+      <div class="sheet-head"><h2>選單</h2><span class="navrow"><button id="menu-close" aria-label="關閉">✕ 完成</button></span></div>
+      <h3>語言優先順序</h3>
+      <p class="help">拖曳排序；點一下啟用／停用。鍵盤：W A S D（或方向鍵）移動，按住 Shift 抓取項目並以 W／S 移動，放開 Shift 放下。</p>
+      <ol id="prio-list" class="prio" aria-label="語言優先順序"></ol>
+      <div class="navrow"><label>族語語別 <select id="ind-lang" aria-label="族語語別"></select></label></div>
+      <h3>輸入</h3>
+      <div class="navrow">
+        <button id="toggle-ime" aria-pressed="true">轉換</button>
+        <button id="toggle-fw" aria-pressed="true">全形標點</button>
+        <button id="toggle-native" aria-pressed="false">系統鍵盤</button>
+      </div>
+      <h3>文字</h3>
+      <div class="navrow"><button id="copy">複製</button><button id="clear">清除</button></div>
+      <p class="help">空白鍵：點一下輸入空白／選字；長按後左右滑動可切換候選字或移動游標，放開確認；長按時向上滑入面板可拖曳語言排序。</p>
+    </div>
+  </div>
 
   <div id="popup" hidden role="listbox" aria-label="變體"></div>
 
