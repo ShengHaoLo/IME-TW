@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { tlToTps, tlMarked, toLatinKey, candidates } from '../src/engine.js';
-import { parseTsv } from '../src/dictdata.js';
+import { tlToTps, tlMarked, toLatinKey, candidates, predictNext } from '../src/engine.js';
+import { parseTsv, parseFreq } from '../src/dictdata.js';
 import { variantsFor, cycleList, FULLWIDTH } from '../src/layout.js';
 
 const load = (lang) => parseTsv(readFileSync(new URL(`../data/${lang}.tsv`, import.meta.url), 'utf8'), lang);
 const loadFile = (lang, file) => parseTsv(readFileSync(new URL(`../data/${file}.tsv`, import.meta.url), 'utf8'), lang);
 const dicts = { nan: load('nan'), hak: load('hak'), cmn: load('cmn'), ind: loadFile('ind', 'ind/ami'), eng: loadFile('eng', 'eng') };
+const freq = parseFreq(readFileSync(new URL('../data/freq.tsv', import.meta.url), 'utf8'));
+for (const l of ['nan', 'hak', 'cmn']) dicts[l].applyFreq(freq);
 
 test('TL to extended Bopomofo and tone marks', () => {
   assert.equal(tlToTps('tai5-uan5'), 'ㄉㄞˊ ㄨㄢˊ');
@@ -112,4 +114,20 @@ test('full-width punctuation table and punctuation variants', () => {
   assert.equal(FULLWIDTH['?'], '？');
   assert.ok(variantsFor('，').some((v) => v.text === ','));
   assert.equal(cycleList('.').at(-1), '.');
+});
+
+test('whole sentences are inferred from an unbroken key sequence', () => {
+  const top = (buf, order) => candidates(buf, dicts, order)[0].text;
+  assert.equal(top('woaini', ['cmn']), '我愛你');
+  assert.equal(top('womenzaitaiwanxuexi', ['cmn']), '我們在臺灣學習');
+  assert.equal(top('iloveyou', ['eng']), 'i love you');
+  assert.equal(candidates('wo', dicts, ['cmn'])[0].text, '我'); // frequency orders homophones
+  const unfinished = candidates('woainixyz', dicts, ['cmn']).find((c) => c.label === '整句');
+  assert.ok(unfinished.text.startsWith('我愛你'));
+});
+
+test('next words are predicted from compounds', () => {
+  const next = predictNext('臺', dicts, ['cmn']).map((c) => c.text);
+  assert.ok(next.includes('灣'));
+  assert.deepEqual(predictNext('hello', dicts), []);
 });

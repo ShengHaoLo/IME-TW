@@ -120,6 +120,8 @@ export function toLatinKey(buffer) {
 export class Dictionary {
   constructor(entries) {
     this.index = new Map();
+    this.entries = entries;
+    this.textList = null;
     entries.forEach((e, i) => { e.o = i; });
     for (const e of entries) {
       for (const k of e.keys) {
@@ -128,6 +130,33 @@ export class Dictionary {
       }
     }
     this.sortedKeys = [...this.index.keys()].sort();
+    this.maxKey = Math.min(32, this.sortedKeys.reduce((m, k) => Math.max(m, k.length), 0));
+  }
+
+  // `freq` maps headword -> corpus count; homophones then come out most frequent first.
+  applyFreq(freq) {
+    for (const e of this.entries) {
+      const f = freq.get(e.text);
+      if (f !== undefined) e.f = f;
+    }
+    for (const list of this.index.values()) list.sort((a, b) => (b.f || 0) - (a.f || 0) || a.o - b.o);
+  }
+
+  // Entries whose text starts with `prefix` and is longer than it, most frequent first.
+  continuations(prefix, limit = 24) {
+    if (!this.textList) this.textList = [...this.entries].sort((a, b) => (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
+    const list = this.textList;
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (list[mid].text < prefix) lo = mid + 1; else hi = mid;
+    }
+    const out = [];
+    for (let i = lo; i < list.length && list[i].text.startsWith(prefix); i++) {
+      if (list[i].text !== prefix) out.push(list[i]);
+    }
+    return out.sort((a, b) => (b.f || 0) - (a.f || 0) || a.o - b.o).slice(0, limit);
   }
 
   // Exact key matches first (file order: short or frequent words first), then completions of the key,
@@ -147,7 +176,7 @@ export class Dictionary {
       for (let i = lo; i < keys.length && keys[i].startsWith(key) && near.length < 3000; i++) {
         if (keys[i] !== key) near.push(keys[i]);
       }
-      near.sort((a, b) => a.length - b.length || this.index.get(a)[0].o - this.index.get(b)[0].o);
+      near.sort((a, b) => a.length - b.length || (this.index.get(b)[0].f || 0) - (this.index.get(a)[0].f || 0) || this.index.get(a)[0].o - this.index.get(b)[0].o);
       for (const k of near) out.push(...this.index.get(k));
     }
     return [...new Set(out)].slice(0, limit);
@@ -163,12 +192,73 @@ function preferTone(hits, buffer) {
   return [...hits.filter((e) => norm(e.reading) === want), ...hits.filter((e) => norm(e.reading) !== want)];
 }
 
+// ---- Sentence inference ----
+
+const LOG_TOTAL = Math.log(1e8);
+const MIN_FREQ = 30; // headwords the corpus never saw still count as ordinary words
+const SPACED = new Set(['eng', 'ind']); // languages whose sentences are written with spaces
+
+// Splits a toneless key into dictionary words with the lowest total cost (a unigram language model:
+// frequent words are cheap, each extra word costs). `prefer(text)` lowers the cost of words the user chose before.
+// Returns { words: [entry], rest } where `rest` is an unfinished tail, or null if fewer than two words fit.
+export function segment(key, dict, prefer = () => 0) {
+  const n = key.length;
+  if (n < 3 || n > 60 || !dict.maxKey) return null;
+  const best = new Array(n + 1).fill(Infinity);
+  const back = new Array(n + 1).fill(null);
+  best[0] = 0;
+  for (let i = 0; i < n; i++) {
+    if (best[i] === Infinity) continue;
+    for (let j = i + 1; j <= Math.min(n, i + dict.maxKey); j++) {
+      const hits = dict.index.get(key.slice(i, j));
+      if (!hits) continue;
+      const e = hits[0];
+      const cost = best[i] + LOG_TOTAL - Math.log(Math.max(e.f || 0, MIN_FREQ)) - prefer(e.text);
+      if (cost < best[j]) { best[j] = cost; back[j] = [i, e]; }
+    }
+  }
+  let end = n;
+  while (end > 0 && best[end] === Infinity) end--;
+  if (end === 0 || n - end > 8) return null;
+  const words = [];
+  for (let k = end; k > 0; k = back[k][0]) words.push(back[k][1]);
+  words.reverse();
+  return words.length >= 2 ? { words, rest: key.slice(end) } : null;
+}
+
+// Likely continuations of the text before the caret: compounds in the dictionaries that begin with its last
+// 1-4 characters, longest context first, then by language priority and frequency.
+export function predictNext(before, dicts, order = LANGS, limit = 8) {
+  const chars = [...before];
+  const out = [];
+  const seen = new Set();
+  for (let len = Math.min(4, chars.length); len >= 1 && out.length < limit; len--) {
+    const prefix = chars.slice(-len).join('');
+    if (!/\p{Script=Han}/u.test(prefix)) continue;
+    for (const lang of order) {
+      if (SPACED.has(lang) || !dicts[lang]) continue;
+      for (const e of dicts[lang].continuations(prefix)) {
+        const next = e.text.slice(prefix.length);
+        if (seen.has(next)) continue;
+        seen.add(next);
+        out.push({ text: next, label: e.text, langs: [lang] });
+        if (out.length >= limit) return out;
+      }
+    }
+  }
+  return out;
+}
+
+// English has so many short words that any letters split into some; keep only splits of common words.
+const plausibleEnglish = ({ words, rest }) => !rest
+  && words.every((e) => e.f >= 1e4 && (e.text.length > 1 || /^[ai]$/i.test(e.text)));
+
 const PER_LANG = 6; // completions shown per language before the rest, so no language crowds out the others
 const capitalise = (t) => t[0].toUpperCase() + t.slice(1);
 
 // `order` is the user's language priority; hits from every language are shown, best-ranked first:
 // the primary language's matches, other languages' exact matches, a few completions each, then the remainder.
-export function candidates(buffer, dicts, order = LANGS, limit = 40) {
+export function candidates(buffer, dicts, order = LANGS, limit = 40, prefer = () => 0) {
   if (!buffer) return [];
   const merged = new Map();
   const add = (text, label, lang, src) => {
@@ -183,8 +273,10 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40) {
 
   const bpmfOnly = STD_BPMF.test(buffer) && !/[a-z]/i.test(buffer);
   const latin = bpmfOnly ? '' : toLatinKey(buffer);
+  const firstEx = [];
   const first = [];
   const exact = [];
+  const sentences = [];
   const near = [];
   const rest = [];
   for (const lang of order) {
@@ -198,8 +290,16 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40) {
     const isExact = (e) => e.keys.includes(key);
     const ex = hits.filter(isExact);
     const others = hits.filter((e) => !isExact(e));
+    if (!bpmfOnly && !ex.length && dict && lang !== 'ind') {
+      const seg = segment(latin, dict, prefer);
+      if (seg && (lang !== 'eng' || plausibleEnglish(seg))) {
+        const text = seg.words.map((e) => e.text).join(SPACED.has(lang) ? ' ' : '') + (seg.rest ? (SPACED.has(lang) ? ' ' : '') + seg.rest : '');
+        sentences.push([{ text, reading: '整句', src: dict.entries[0]?.src }, lang]);
+      }
+    }
     if (lang === order[0]) {
-      first.push(...ex.map((e) => [e, lang]), ...others.slice(0, PER_LANG).map((e) => [e, lang]));
+      firstEx.push(...ex.map((e) => [e, lang]));
+      first.push(...others.slice(0, PER_LANG).map((e) => [e, lang]));
       rest.push(...others.slice(PER_LANG).map((e) => [e, lang]));
       continue;
     }
@@ -207,7 +307,12 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40) {
     near.push(...others.slice(0, PER_LANG).map((e) => [e, lang]));
     rest.push(...others.slice(PER_LANG).map((e) => [e, lang]));
   }
-  for (const [e, lang] of [...first, ...exact, ...near, ...rest]) add(e.text, e.reading, lang, e.src);
+  // A whole-key dictionary match beats an inferred sentence; with none, the sentence leads.
+  const anyExact = firstEx.length || exact.length;
+  const ordered = anyExact
+    ? [...firstEx, ...first, ...exact, ...sentences, ...near, ...rest]
+    : [...sentences, ...first, ...near, ...rest];
+  for (const [e, lang] of ordered) add(e.text, e.reading, lang, e.src);
   const dictList = [...merged.values()];
   const extras = [];
   if (/^[A-Za-z0-9'-]+$/.test(buffer)) {

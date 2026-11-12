@@ -1,5 +1,5 @@
-import { Dictionary, candidates } from './engine.js';
-import { loadDictionary } from './dictdata.js';
+import { Dictionary, candidates, predictNext } from './engine.js';
+import { loadDictionary, loadFrequencies } from './dictdata.js';
 import {
   LANGS, LANG_NAME, LANG_BADGE, IND_LANGS, ROWS, SYM_ROWS, FULLWIDTH, QUOTES, variantsFor, hasVariants, cycleList,
 } from './layout.js';
@@ -28,6 +28,7 @@ const state = {
   fullwidth: true, // type full-width punctuation (，。？) while converting
   ind: 'ami',     // the Indigenous language whose word list is used
   off: [],        // languages switched off in the priority list
+  sugg: [],       // next-word suggestions shown while not composing
 };
 
 const store = {
@@ -44,6 +45,19 @@ const savedOff = store.get('off');
 if (Array.isArray(savedOff)) state.off = savedOff.filter((l) => LANGS.includes(l)).slice(0, LANGS.length - 1);
 if (IND_LANGS.some(([c]) => c === store.get('ind'))) state.ind = store.get('ind');
 if (store.get('fullwidth') === false) state.fullwidth = false;
+
+// What the user taught the keyboard: candidates they reordered, words they picked, which word followed which.
+const learn = { pref: store.get('pref') || {}, uni: store.get('uni') || {}, bi: store.get('bi') || {} };
+let lastWord = ''; // last word committed from the candidate bar, for learning word pairs
+
+function bump(map, key, by = 1) {
+  map[key] = (map[key] || 0) + by;
+  const keys = Object.keys(map);
+  if (keys.length > 4000) for (const k of keys) { map[k] = Math.floor(map[k] / 2); if (!map[k]) delete map[k]; }
+}
+
+const saveLearn = () => { store.set('pref', learn.pref); store.set('uni', learn.uni); store.set('bi', learn.bi); };
+const prefer = (text) => Math.min(6, Math.log(1 + (learn.uni[text] || 0)) * 2);
 
 const graphemes = (s) => (typeof Intl.Segmenter === 'function'
   ? Array.from(new Intl.Segmenter().segment(s), (x) => x.segment)
@@ -114,16 +128,43 @@ function moveCaret(d) {
 // Languages in priority order, without the ones switched off.
 const activeOrder = () => state.order.filter((l) => !state.off.includes(l));
 
+// The user's manual order for this buffer first, then words they picked before, then the engine's ranking.
+function personalise(list) {
+  const pref = learn.pref[state.buffer.toLowerCase()] || [];
+  const rank = (c) => {
+    const i = pref.indexOf(c.text);
+    if (i >= 0) return -1e6 + i;
+    return c.langs.length ? -(learn.uni[c.text] || 0) : 0;
+  };
+  return list.map((c, i) => [c, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([c]) => c);
+}
+
 function refresh() {
-  state.cands = candidates(state.buffer, dicts, activeOrder());
+  state.cands = personalise(candidates(state.buffer, dicts, activeOrder(), 40, prefer));
   state.sel = 0;
   render();
+}
+
+// Next-word suggestions: words that followed the last one before, then compounds starting with the text so far.
+function suggest() {
+  const before = pad.value.slice(0, pad.selectionStart);
+  const out = [];
+  const seen = new Set();
+  const add = (c) => { if (!seen.has(c.text)) { seen.add(c.text); out.push(c); } };
+  if (lastWord && before.endsWith(lastWord)) {
+    const next = learn.bi[lastWord] || {};
+    Object.entries(next).sort((a, b) => b[1] - a[1]).slice(0, 4).forEach(([text]) => add({ text, label: '常接', langs: [] }));
+  }
+  if (state.on) predictNext(before, dicts, activeOrder()).forEach(add);
+  return out.slice(0, 10);
 }
 
 function render() {
   $('buffer').textContent = state.buffer;
   const list = $('cands');
-  list.replaceChildren(...state.cands.map((c, i) => {
+  state.sugg = state.buffer ? [] : suggest();
+  const shown = state.buffer ? state.cands : state.sugg;
+  list.replaceChildren(...shown.map((c, i) => {
     const li = document.createElement('li');
     li.append(c.text);
     if (c.label) {
@@ -139,19 +180,51 @@ function render() {
       li.append(b);
     }
     if (c.src) li.title = c.src;
-    if (i === state.sel) li.className = 'sel';
-    li.addEventListener('pointerdown', (e) => { e.preventDefault(); commit(i); });
+    if (!state.buffer) li.className = 'sugg';
+    else if (i === state.sel) li.className = 'sel';
+    li.addEventListener('pointerdown', (e) => { e.preventDefault(); if (state.buffer) commit(i); else acceptSuggestion(c); });
     return li;
   }));
   list.querySelector('.sel')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
+function learnWord(text) {
+  if (lastWord && pad.value.slice(0, pad.selectionStart).endsWith(lastWord)) {
+    learn.bi[lastWord] = learn.bi[lastWord] || {};
+    bump(learn.bi[lastWord], text);
+  }
+  bump(learn.uni, text);
+  lastWord = text;
+  saveLearn();
+}
+
 function commit(i = state.sel) {
   state.cycle = null;
   const c = state.cands[i];
-  if (c) insert(c.text);
+  if (c) {
+    if (c.langs.length) learnWord(c.text);
+    insert(c.text);
+  }
   state.buffer = '';
   refresh();
+}
+
+function acceptSuggestion(c) {
+  state.cycle = null;
+  learnWord(c.text);
+  insert(c.text);
+  render();
+  pad.focus({ preventScroll: true });
+}
+
+// Manual reorder from the long-press popup: remember the order for this buffer.
+function reorderCandidates(texts, picked) {
+  learn.pref[state.buffer.toLowerCase()] = texts;
+  saveLearn();
+  const rest = state.cands.filter((c) => !texts.includes(c.text));
+  state.cands = [...texts.map((t) => state.cands.find((c) => c.text === t)), ...rest];
+  state.sel = Math.max(0, texts.indexOf(picked));
+  render();
 }
 
 function commitRaw() {
@@ -224,6 +297,9 @@ pad.addEventListener('keydown', (e) => {
   if (press(e.key)) e.preventDefault();
 });
 pad.addEventListener('click', () => { state.cycle = null; });
+// Next-word suggestions follow the text before the caret while nothing is being composed.
+pad.addEventListener('input', () => { if (!state.buffer) render(); });
+document.addEventListener('selectionchange', () => { if (document.activeElement === pad && !state.buffer) render(); });
 
 // ---- On-screen keyboard ----
 
@@ -384,10 +460,11 @@ function actionKey(label, cls, fn, { repeat = false } = {}) {
   return b;
 }
 
-// ---- Space bar: tap = space / pick; long-press + slide = move through candidates or text;
-// slide up into the popup = reorder language priority ----
+// ---- Space bar: tap = space / pick; swipe (or long-press + slide) = move through candidates or the caret, release
+// confirms; long-press opens a popup to drag candidates (while composing) or languages into a new order ----
 
 const STEP_PX = 22; // horizontal slide per step
+const SLIDE_START_PX = 12; // a swipe this wide on the space bar starts moving through candidates
 
 function moveSelection(d) {
   if (state.on && state.buffer && state.cands.length > 1) {
@@ -403,26 +480,38 @@ function spaceKey() {
   b.textContent = '空白 / 選字';
   let timer = null;
   let held = false;
+  let sliding = false;
   let anchor = 0;
   let steps = 0;
+  let pop = prioPop;
 
   b.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     capture(b, e);
     b.classList.add('down');
     held = false;
+    sliding = false;
     anchor = e.clientX;
     steps = 0;
-    timer = setTimeout(() => { held = true; openPrioPop(b); }, LONG_PRESS_MS);
+    timer = setTimeout(() => {
+      held = true;
+      pop = state.on && state.buffer && state.cands.length > 1 ? candPop : prioPop;
+      openPop(pop, b);
+    }, LONG_PRESS_MS);
   });
   b.addEventListener('pointermove', (e) => {
-    if (!held) return;
-    const r = prioPop.getBoundingClientRect();
+    if (!held && !sliding) {
+      if (Math.abs(e.clientX - anchor) < SLIDE_START_PX) return;
+      clearTimeout(timer);
+      sliding = true;
+      anchor = e.clientX;
+    }
+    const r = held ? pop.getBoundingClientRect() : { left: 0, right: 0, top: 0, bottom: 0 };
     const inPop = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (inPop || drag.li) {
       if (!drag.li) {
-        const li = document.elementFromPoint(e.clientX, e.clientY)?.closest('#prio-pop li');
-        if (li) dragStart(prioPop, li);
+        const li = document.elementFromPoint(e.clientX, e.clientY)?.closest('li');
+        if (li && li.parentElement === pop) dragStart(pop, li);
       }
       dragMove(e.clientX, e.clientY);
       return;
@@ -437,11 +526,13 @@ function spaceKey() {
   const finish = (cancelled) => {
     clearTimeout(timer);
     b.classList.remove('down');
-    if (!held) { if (!cancelled) { state.cycle = null; if (!press(' ')) insert(' '); } return; }
+    if (!held && !sliding) { if (!cancelled) { state.cycle = null; if (!press(' ')) insert(' '); } return; }
+    const wasHeld = held;
     held = false;
-    if (drag.li) dragEnd();
+    sliding = false;
+    if (wasHeld && drag.li) dragEnd();
     else if (!cancelled && state.on && state.buffer) commit(); // release confirms the selection
-    closePrioPop();
+    closePops();
   };
   b.addEventListener('pointerup', () => finish(false));
   b.addEventListener('pointercancel', () => finish(true));
@@ -546,6 +637,7 @@ function setActive(lang, on) {
 // ---- Language priority: draggable list in the menu and in the space-bar popup ----
 
 const prioPop = $('prio-pop');
+const candPop = $('cand-pop');
 const prioList = $('prio-list');
 const drag = { ol: null, li: null };
 
@@ -587,6 +679,14 @@ function dragMove(x, y) {
 }
 
 function dragEnd() {
+  if (drag.ol === candPop) {
+    const picked = drag.li.dataset.text;
+    const texts = [...candPop.children].map((li) => li.dataset.text);
+    drag.ol = null;
+    drag.li = null;
+    reorderCandidates(texts, picked);
+    return;
+  }
   const lang = drag.li?.dataset.lang;
   const list = drag.ol ? [...drag.ol.children].map((li) => li.dataset.lang) : state.order;
   drag.ol = null;
@@ -621,18 +721,37 @@ const endPress = (cancelled) => {
 prioList.addEventListener('pointerup', () => endPress(false));
 prioList.addEventListener('pointercancel', () => endPress(true));
 
-function openPrioPop(anchorEl) {
-  renderPriority();
-  prioPop.hidden = false;
-  const r = anchorEl.getBoundingClientRect();
-  const w = prioPop.offsetWidth;
-  const h = prioPop.offsetHeight;
-  prioPop.style.left = `${Math.max(4, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 4))}px`;
-  prioPop.style.top = `${Math.max(4, r.top - h - 8)}px`;
+function renderCandPop() {
+  candPop.replaceChildren(...state.cands.slice(0, 8).map((c, i) => {
+    const li = document.createElement('li');
+    li.dataset.text = c.text;
+    const n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = i + 1;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = c.text;
+    const cl = document.createElement('span');
+    cl.className = 'cl';
+    cl.textContent = c.label || '';
+    li.append(n, name, cl);
+    return li;
+  }));
 }
 
-function closePrioPop() {
+function openPop(pop, anchorEl) {
+  if (pop === candPop) renderCandPop(); else renderPriority();
+  pop.hidden = false;
+  const r = anchorEl.getBoundingClientRect();
+  const w = pop.offsetWidth;
+  const h = pop.offsetHeight;
+  pop.style.left = `${Math.max(4, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 4))}px`;
+  pop.style.top = `${Math.max(4, r.top - h - 8)}px`;
+}
+
+function closePops() {
   prioPop.hidden = true;
+  candPop.hidden = true;
 }
 
 // ---- Menu (GUI) with W A S D / arrow navigation; hold Shift to grab a language and move it ----
@@ -774,9 +893,15 @@ setNative(false);
 setFullwidth(state.fullwidth);
 setOrder(state.order);
 
+// Word frequencies order homophones (wo → 我 first) and drive sentence inference for the Han dictionaries.
+const freqReady = loadFrequencies().catch((err) => { console.error(err); return new Map(); });
+
 for (const lang of LANGS.filter((l) => l !== 'ind')) {
   loadDictionary(lang)
-    .then((d) => { dicts[lang] = d; })
+    .then(async (d) => {
+      if (['nan', 'hak', 'cmn'].includes(lang)) d.applyFreq(await freqReady);
+      dicts[lang] = d;
+    })
     .catch((err) => console.error(err))
     .finally(() => { loading.delete(lang); updateHint(); refresh(); });
 }
