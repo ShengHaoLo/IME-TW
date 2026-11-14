@@ -58,6 +58,14 @@ const EXTRA = {
   8: [['˙', 'nan']],
 };
 
+// Extended Bopomofo for Hokkien sits under the plain Bopomofo letter it resembles (long-press or ⇧).
+const DACHEN_EXTRA = {
+  ㄅ: 'ㆠ', ㄆ: 'ㆴ', ㄇ: 'ㆬㆱ', ㄋ: 'ㆭㄫⁿ', ㄊ: 'ㆵ', ㄌ: 'ㆹ', ㄍ: 'ㆣㆸㆻㆼ', ㄎ: 'ㆶㆽ', ㄏ: 'ㆷ', ㄐ: 'ㆢ',
+  ㄗ: 'ㆡㆺ', ㄚ: 'ㆩㆮㆯㆰㆿ', ㄛ: 'ㆦㆧㆲㆾ', ㄜ: 'ㆤㆥ', ㄧ: 'ㆪㆨㆳ', ㄨ: 'ㆫ',
+  ˊ: '˪˫', ˇ: '˪', ˋ: '˫', '˙': '˙',
+};
+for (const [key, list] of Object.entries(DACHEN_EXTRA)) EXTRA[key] = [...list].map((c) => [c, 'nan']);
+
 // Punctuation and symbols: the key shown is the base; the variants are its width forms and relatives.
 const PUNCT = {
   '，': ',、﹐', '。': '.．｡', '、': '\\､', '？': '?¿', '！': '!¡', '：': ':︰', '；': ';', '…': '⋯‥...', '～': '~〜∼', '—': '-–─－ー',
@@ -94,6 +102,13 @@ export const hasVariants = (key) => (EXTRA[key] || MARKED_BASES.includes(key)) ?
 
 // Shift+key walks this list; the plain key is last so the cycle can return to it.
 export const cycleList = (key, order = LANGS) => [...variantsFor(key, order).map((v) => v.text), key];
+
+// 大千 (Dachen) Bopomofo layout: the standard Taiwanese Zhuyin keyboard, row by row.
+export const DACHEN_ROWS = ['ㄅㄉˇˋㄓˊ˙ㄚㄞㄢㄦ', 'ㄆㄊㄍㄐㄔㄗㄧㄛㄟㄣ', 'ㄇㄋㄎㄑㄕㄘㄨㄜㄠㄤ', 'ㄈㄌㄏㄒㄖㄙㄩㄝㄡㄥ'];
+// Physical key -> Bopomofo, for typing on a hardware keyboard in 大千 mode.
+export const DACHEN_MAP = Object.fromEntries(
+  ['1234567890-', 'qwertyuiop', "asdfghjkl;", 'zxcvbnm,./'].flatMap((r, i) => [...r].map((k, j) => [k, DACHEN_ROWS[i][j]])),
+);
 
 export const ROWS = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
 export const SYM_ROWS = ['，。、？！：；…～—', '「」『』（）【】《》', '“”‘’()[]{}', '@#$%&*+=/'];

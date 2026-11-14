@@ -40,6 +40,17 @@
       <p class="help">拖曳排序；點一下啟用／停用。鍵盤：W A S D（或方向鍵）移動，按住 Shift 抓取項目並以 W／S 移動，放開 Shift 放下。</p>
       <ol id="prio-list" class="prio" aria-label="語言優先順序"></ol>
       <div class="navrow"><label>族語語別 <select id="ind-lang" aria-label="族語語別"></select></label></div>
+      <h3>鍵盤與輸出</h3>
+      <div class="navrow seg" role="group" aria-label="鍵盤配置">
+        <button data-kbd="qwerty" aria-pressed="true">QWERTY</button>
+        <button data-kbd="dachen" aria-pressed="false">大千注音</button>
+      </div>
+      <div class="navrow seg" role="group" aria-label="輸出文字">
+        <button data-out="han" aria-pressed="true">全漢字</button>
+        <button data-out="both" aria-pressed="false">漢字＋拼音</button>
+        <button data-out="latin" aria-pressed="false">全拼音</button>
+      </div>
+      <p class="help">輸出：漢字＋拼音寫成「漢字(拼音)」；拼音依語言為臺羅（臺語）、客語拼音、漢語拼音（華語，不標調），英語與族語照原字。</p>
       <h3>輸入</h3>
       <div class="navrow">
         <button id="toggle-ime" aria-pressed="true">轉換</button>

@@ -1,7 +1,7 @@
 import { Dictionary, candidates, predictNext } from './engine.js';
 import { loadDictionary, loadFrequencies } from './dictdata.js';
 import {
-  LANGS, LANG_NAME, LANG_BADGE, IND_LANGS, ROWS, SYM_ROWS, FULLWIDTH, QUOTES, variantsFor, hasVariants, cycleList,
+  DACHEN_ROWS, DACHEN_MAP, LANGS, LANG_NAME, LANG_BADGE, IND_LANGS, ROWS, SYM_ROWS, FULLWIDTH, QUOTES, variantsFor, hasVariants, cycleList,
 } from './layout.js';
 
 // Dictionaries load in the background; typing works (conversions only) before they arrive.
@@ -28,6 +28,8 @@ const state = {
   fullwidth: true, // type full-width punctuation (，。？) while converting
   ind: 'ami',     // the Indigenous language whose word list is used
   off: [],        // languages switched off in the priority list
+  kbd: 'qwerty',  // 'qwerty' | 'dachen'
+  out: 'han',     // output script: 'han' | 'both' (漢字(拼音)) | 'latin'
   sugg: [],       // next-word suggestions shown while not composing
 };
 
@@ -45,6 +47,14 @@ const savedOff = store.get('off');
 if (Array.isArray(savedOff)) state.off = savedOff.filter((l) => LANGS.includes(l)).slice(0, LANGS.length - 1);
 if (IND_LANGS.some(([c]) => c === store.get('ind'))) state.ind = store.get('ind');
 if (store.get('fullwidth') === false) state.fullwidth = false;
+if (['qwerty', 'dachen'].includes(store.get('kbd'))) state.kbd = store.get('kbd');
+if (['han', 'both', 'latin'].includes(store.get('out'))) state.out = store.get('out');
+
+// What a candidate writes into the text under the current output mode.
+function outText(c) {
+  if (!c.latin || c.latin === c.text || state.out === 'han') return c.text;
+  return state.out === 'latin' ? c.latin : `${c.text}(${c.latin})`;
+}
 
 // What the user taught the keyboard: candidates they reordered, words they picked, which word followed which.
 const learn = { pref: store.get('pref') || {}, uni: store.get('uni') || {}, bi: store.get('bi') || {} };
@@ -166,7 +176,7 @@ function render() {
   const shown = state.buffer ? state.cands : state.sugg;
   list.replaceChildren(...shown.map((c, i) => {
     const li = document.createElement('li');
-    li.append(c.text);
+    li.append(outText(c));
     if (c.label) {
       const s = document.createElement('small');
       s.textContent = c.label;
@@ -203,7 +213,7 @@ function commit(i = state.sel) {
   const c = state.cands[i];
   if (c) {
     if (c.langs.length) learnWord(c.text);
-    insert(c.text);
+    insert(outText(c));
   }
   state.buffer = '';
   refresh();
@@ -287,6 +297,7 @@ const MODIFIERS = ['Shift', 'CapsLock', 'Control', 'Alt', 'Meta', 'AltGraph'];
 // the usual symbols (full-width in Chinese mode).
 pad.addEventListener('keydown', (e) => {
   if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || MODIFIERS.includes(e.key)) return;
+  if (state.kbd === 'dachen' && !e.shiftKey && DACHEN_MAP[e.key]) { e.preventDefault(); tapSymbol(DACHEN_MAP[e.key]); return; }
   const m = /^Key([A-Z])$/.exec(e.code);
   if (m && e.shiftKey && hasVariants(m[1].toLowerCase())) { e.preventDefault(); cycleVariant(m[1].toLowerCase()); return; }
   if (state.on) {
@@ -587,6 +598,23 @@ function buildKeyboard() {
     );
     return;
   }
+  if (state.kbd === 'dachen') {
+    $('kbd').replaceChildren(
+      row(...chars(DACHEN_ROWS[0], tapSymbol)),
+      row(...chars(DACHEN_ROWS[1], tapSymbol)),
+      row(...chars(DACHEN_ROWS[2], tapSymbol)),
+      row(shiftBtn, ...chars(DACHEN_ROWS[3], tapSymbol), back),
+      row(
+        actionKey('EN', 'fn', () => setKbd('qwerty')),
+        actionKey('符', 'fn', layer('sym')),
+        characterKey(',', typePunct),
+        space,
+        characterKey('.', typePunct),
+        enter,
+      ),
+    );
+    return;
+  }
   $('kbd').replaceChildren(
     row(...chars(ROWS[0])),
     row(...chars(ROWS[1])),
@@ -866,6 +894,22 @@ async function setInd(code) {
   refresh();
 }
 
+function setKbd(k) {
+  state.kbd = k;
+  store.set('kbd', k);
+  state.layer = 'abc';
+  state.cycle = null;
+  document.querySelectorAll('[data-kbd]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.kbd === k)));
+  buildKeyboard();
+}
+
+function setOut(o) {
+  state.out = o;
+  store.set('out', o);
+  document.querySelectorAll('[data-out]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.out === o)));
+  render();
+}
+
 function setNative(on) {
   state.native = on;
   $('toggle-native').setAttribute('aria-pressed', String(on));
@@ -889,6 +933,10 @@ $('clear').addEventListener('click', () => { pad.value = ''; state.buffer = ''; 
 document.addEventListener('pointerdown', (e) => { if (!popup.hidden && !popup.contains(e.target)) hidePopup(); }, true);
 $('kbd').addEventListener('contextmenu', (e) => e.preventDefault());
 
+document.querySelectorAll('[data-kbd]').forEach((b) => b.addEventListener('click', () => setKbd(b.dataset.kbd)));
+document.querySelectorAll('[data-out]').forEach((b) => b.addEventListener('click', () => setOut(b.dataset.out)));
+setKbd(state.kbd);
+setOut(state.out);
 setNative(false);
 setFullwidth(state.fullwidth);
 setOrder(state.order);

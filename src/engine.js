@@ -253,6 +253,13 @@ export function predictNext(before, dicts, order = LANGS, limit = 8) {
 const plausibleEnglish = ({ words, rest }) => !rest
   && words.every((e) => e.f >= 1e4 && (e.text.length > 1 || /^[ai]$/i.test(e.text)));
 
+// Latin transcription of an entry: TL for Hokkien, the MOE romanisation for Hakka, pinyin for Mandarin.
+export function latinOf(e, lang) {
+  if (lang === 'cmn') return e.keys.find((k) => /^[a-z]+$/.test(k)) || e.text;
+  if (lang === 'ind' || lang === 'eng') return e.text;
+  return e.reading || e.text;
+}
+
 const PER_LANG = 6; // completions shown per language before the rest, so no language crowds out the others
 const capitalise = (t) => t[0].toUpperCase() + t.slice(1);
 
@@ -261,11 +268,11 @@ const capitalise = (t) => t[0].toUpperCase() + t.slice(1);
 export function candidates(buffer, dicts, order = LANGS, limit = 40, prefer = () => 0) {
   if (!buffer) return [];
   const merged = new Map();
-  const add = (text, label, lang, src) => {
+  const add = (text, label, lang, src, latin) => {
     if ((lang === 'eng' || lang === 'ind') && /^[A-Z]/.test(buffer) && /^[a-z]/.test(text)) text = capitalise(text);
     let c = merged.get(text);
     if (!c) {
-      c = { text, label, src, langs: [] };
+      c = { text, label, src, latin, langs: [] };
       merged.set(text, c);
     }
     if (!c.langs.includes(lang)) c.langs.push(lang);
@@ -294,7 +301,8 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40, prefer = ()
       const seg = segment(latin, dict, prefer);
       if (seg && (lang !== 'eng' || plausibleEnglish(seg))) {
         const text = seg.words.map((e) => e.text).join(SPACED.has(lang) ? ' ' : '') + (seg.rest ? (SPACED.has(lang) ? ' ' : '') + seg.rest : '');
-        sentences.push([{ text, reading: '整句', src: dict.entries[0]?.src }, lang]);
+        const latinText = seg.words.map((e) => latinOf(e, lang)).join(' ') + (seg.rest ? ` ${seg.rest}` : '');
+        sentences.push([{ text, reading: '整句', latin: latinText, src: dict.entries[0]?.src }, lang]);
       }
     }
     if (lang === order[0]) {
@@ -312,7 +320,7 @@ export function candidates(buffer, dicts, order = LANGS, limit = 40, prefer = ()
   const ordered = anyExact
     ? [...firstEx, ...first, ...exact, ...sentences, ...near, ...rest]
     : [...sentences, ...first, ...near, ...rest];
-  for (const [e, lang] of ordered) add(e.text, e.reading, lang, e.src);
+  for (const [e, lang] of ordered) add(e.text, e.reading, lang, e.src, e.latin ?? latinOf(e, lang));
   const dictList = [...merged.values()];
   const extras = [];
   if (/^[A-Za-z0-9'-]+$/.test(buffer)) {

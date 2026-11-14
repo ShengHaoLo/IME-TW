@@ -103,3 +103,4 @@ header h1 { flex: 1 1 100%; }
 #cand-pop li .cl { margin-left: auto; font-size: .75em; color: var(--muted); }
 #cand-pop li.grab .cl { color: inherit; }
 #cands li.sugg::before { content: "›"; color: var(--muted); margin-right: .25em; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
