@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6f5c">
+  <title>臺灣語言輸入法 IME-TW</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>臺灣語言輸入法 <small>IME-TW</small></h1>
+    <button id="menu-btn" aria-haspopup="dialog">☰ 選單</button>
+    <button id="prio-strip" title="語言優先順序：長按空白鍵或點此調整"></button>
+  </header>
+
+  <main>
+    <textarea id="pad" placeholder="在這裡寫下你的故事… Write your story here…" aria-label="書寫區" spellcheck="false" autofocus></textarea>
+
+    <div id="composer" aria-live="polite">
+      <div id="buffer"></div>
+      <ol id="cands"></ol>
+    </div>
+
+    <div id="hint"></div>
+
+    <section id="kbd" aria-label="螢幕鍵盤"></section>
+
+  </main>
+
+  <ol id="prio-pop" class="prio" hidden aria-label="語言優先順序"></ol>
+  <ol id="cand-pop" class="prio" hidden aria-label="候選字排序"></ol>
+
+  <div id="menu" hidden role="dialog" aria-modal="true" aria-label="選單">
+    <div class="sheet">
+      <div class="sheet-head"><h2>選單</h2><span class="navrow"><button id="menu-close" aria-label="關閉">✕ 完成</button></span></div>
+      <h3>語言優先順序</h3>
+      <p class="help">拖曳排序；點一下啟用／停用。鍵盤：W A S D（或方向鍵）移動，按住 Shift 抓取項目並以 W／S 移動，放開 Shift 放下。</p>
+      <ol id="prio-list" class="prio" aria-label="語言優先順序"></ol>
+      <div class="navrow"><label>族語語別 <select id="ind-lang" aria-label="族語語別"></select></label></div>
+      <h3>鍵盤與輸出</h3>
+      <div class="navrow seg" role="group" aria-label="鍵盤配置">
+        <button data-kbd="qwerty" aria-pressed="true">QWERTY</button>
+        <button data-kbd="dachen" aria-pressed="false">大千注音</button>
+      </div>
+      <div class="navrow seg" role="group" aria-label="輸出文字">
+        <button data-out="han" aria-pressed="true">全漢字</button>
+        <button data-out="both" aria-pressed="false">漢字＋拼音</button>
+        <button data-out="latin" aria-pressed="false">全拼音</button>
+      </div>
+      <p class="help">輸出：漢字＋拼音寫成「漢字(拼音)」；拼音依語言為臺羅（臺語）、客語拼音、漢語拼音（華語，不標調），英語與族語照原字。</p>
+      <h3>輸入</h3>
+      <div class="navrow">
+        <button id="toggle-ime" aria-pressed="true">轉換</button>
+        <button id="toggle-fw" aria-pressed="true">全形標點</button>
+        <button id="toggle-native" aria-pressed="false">系統鍵盤</button>
+      </div>
+      <h3>文字</h3>
+      <div class="navrow"><button id="copy">複製</button><button id="clear">清除</button></div>
+      <p class="help">空白鍵：點一下輸入空白／選字；長按後左右滑動可切換候選字或移動游標，放開確認；長按時向上滑入面板可拖曳語言排序。</p>
+    </div>
+  </div>
+
+  <div id="popup" hidden role="listbox" aria-label="變體"></div>
+
+  <footer>
+    字典來源：教育部臺灣閩南語常用詞辭典、臺灣客家語常用詞辭典、重編國語辭典修訂本（CC BY-ND 3.0 臺灣）；族語詞表：原住民族語言研究發展基金會《族語E樂園》（CC BY-NC-SA 4.0，經 FormosanBank 取得）；英語常用字：FrequencyWords（CC BY-SA 4.0）。詳見 data/NOTICE.md。
+  </footer>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
